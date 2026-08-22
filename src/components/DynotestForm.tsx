@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   User,
   ChecksheetItem,
@@ -11,6 +11,7 @@ import {
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
+import { evaluateFormResult } from '../utils/formEvaluation';
 import {
   Search,
   Gauge,
@@ -24,6 +25,7 @@ import {
   ArrowRight,
   Lock,
   ListOrdered,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   formatDateTime,
@@ -210,6 +212,23 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     return false;
   };
 
+  // System Automatic Result Evaluation
+  const systemEval = useMemo(() => {
+    return evaluateFormResult(checksheetItems, answers, itemRemarks);
+  }, [checksheetItems, answers, itemRemarks]);
+
+  // Keep finalResult in sync with automatic evaluation
+  useEffect(() => {
+    if (systemEval.status === 'GOOD') {
+      setFinalResult('GOOD');
+    } else if (systemEval.status === 'NOT GOOD') {
+      setFinalResult('NOT GOOD');
+      if (systemEval.failedItems.length > 0 && !ngItem) {
+        setNgItem(systemEval.failedItems.map((f) => f.item.itemName).join(', '));
+      }
+    }
+  }, [systemEval]);
+
   const validateForm = (): boolean => {
     setValidationAttempted(true);
 
@@ -222,16 +241,19 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       return false;
     }
 
-    const activeItems = checksheetItems.filter((i) => i.active !== false && i.mandatory);
-    const missingItems = activeItems.filter((i) => !answers[i.id] || answers[i.id].trim() === '');
-
-    if (missingItems.length > 0) {
-      setValidationError(
-        `Please complete all ${missingItems.length} mandatory Dynotest checksheet items before submitting.`
-      );
-      const firstMissingId = `checksheet-item-${missingItems[0].id}`;
-      const elem = document.getElementById(firstMissingId);
-      if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!systemEval.isComplete) {
+      if (systemEval.specMissingItems.length > 0) {
+        setValidationError(
+          `SPECIFICATION NOT CONFIGURED for ${systemEval.specMissingItems.map((i) => i.itemName).join(', ')}. Cannot submit.`
+        );
+      } else {
+        setValidationError(
+          `Please complete all ${systemEval.missingItems.length} mandatory Dynotest checksheet items before submitting.`
+        );
+        const firstMissingId = `checksheet-item-${systemEval.missingItems[0].id}`;
+        const elem = document.getElementById(firstMissingId);
+        if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       return false;
     }
 
@@ -243,17 +265,8 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       return false;
     }
 
-    const anyFailed = checkAnyItemFailed();
-    if (anyFailed && finalResult === 'GOOD') {
-      setValidationError(
-        'Cannot submit overall result as GOOD because one or more checksheet items are FAIL or NOT GOOD.'
-      );
-      return false;
-    }
-
-    if (finalResult === 'NOT GOOD' && !ngItem.trim()) {
-      setValidationError('Please select or specify the NG Item.');
-      return false;
+    if (systemEval.status === 'NOT GOOD' && !ngItem.trim()) {
+      setNgItem(systemEval.failedItems.map((f) => f.item.itemName).join(', ') || 'Engine Performance Parameter Failure');
     }
 
     setValidationError(null);
@@ -642,42 +655,85 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
             />
           </div>
 
-          {/* SECTION 3: FINAL DYNO RESULT SELECTION */}
+          {/* SECTION 3: SYSTEM EVALUATED RESULT (READ-ONLY) */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">
-              3. Final Dynotest Result
+              3. System Evaluated Dynotest Result
             </h3>
 
-            <div className="flex items-center space-x-4">
-              <button
-                type="button"
-                onClick={() => setFinalResult('GOOD')}
-                className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
-                  finalResult === 'GOOD'
-                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg ring-2 ring-emerald-500/30'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <CheckCircle2 className="w-5 h-5" />
-                <span>GOOD (Testing Passed)</span>
-              </button>
+            {/* Read-Only Compact Result Banner */}
+            <div
+              className={`border rounded-2xl p-4 space-y-3 transition-all ${
+                systemEval.status === 'GOOD'
+                  ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                  : systemEval.status === 'NOT GOOD'
+                  ? 'bg-rose-50/80 border-rose-300 text-rose-950'
+                  : 'bg-amber-50/80 border-amber-300 text-amber-950'
+              }`}
+            >
+              <div className="flex items-center justify-between border-b border-black/10 pb-2">
+                <div className="flex items-center space-x-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span className="text-[11px] font-black uppercase tracking-wider opacity-80">
+                    System Generated Dynotest Quality Result
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/90 border border-black/10">
+                  READ-ONLY
+                </span>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setFinalResult('NOT GOOD')}
-                className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
-                  finalResult === 'NOT GOOD'
-                    ? 'bg-rose-600 border-rose-600 text-white shadow-lg ring-2 ring-rose-500/30'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                <XCircle className="w-5 h-5" />
-                <span>NOT GOOD (NG)</span>
-              </button>
+              <div className="flex items-center space-x-3">
+                {systemEval.status === 'GOOD' ? (
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                ) : systemEval.status === 'NOT GOOD' ? (
+                  <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <XCircle className="w-6 h-6" />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs font-black text-lg">
+                    !
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-base sm:text-lg font-black tracking-tight">
+                    {systemEval.status === 'GOOD'
+                      ? '✓ GOOD'
+                      : systemEval.status === 'NOT GOOD'
+                      ? '✕ NOT GOOD'
+                      : 'INCOMPLETE CHECKLIST'}
+                  </div>
+                  <div className="text-xs font-semibold opacity-90 mt-0.5 leading-snug">
+                    {systemEval.systemRemark}
+                  </div>
+                </div>
+              </div>
+
+              {/* Failed Items List */}
+              {systemEval.status === 'NOT GOOD' && systemEval.failedItems.length > 0 && (
+                <div className="bg-white/90 border border-rose-200 rounded-xl p-3 text-xs space-y-1">
+                  <div className="font-bold text-rose-800 uppercase text-[10px] tracking-wider">
+                    Failed Performance Parameters ({systemEval.failedItems.length})
+                  </div>
+                  <ul className="space-y-1 text-slate-800 font-medium">
+                    {systemEval.failedItems.map((f, idx) => (
+                      <li key={idx} className="flex items-start space-x-1.5">
+                        <span className="text-rose-600 font-bold">•</span>
+                        <span>
+                          <strong>{f.item.itemName}</strong>: {f.reason}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
-            {/* NOT GOOD Sub-Form */}
-            {finalResult === 'NOT GOOD' && (
+            {/* Defect Identification Details if NOT GOOD */}
+            {systemEval.status === 'NOT GOOD' && (
               <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center space-x-2 text-rose-800 text-xs font-bold uppercase">
                   <AlertTriangle className="w-4 h-4 text-rose-600" />
@@ -713,7 +769,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    NG Description & Root Cause <span className="text-rose-500">*</span>
+                    NG Description & Root Cause Details
                   </label>
                   <textarea
                     rows={3}
@@ -754,7 +810,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Overall Testing Remarks
+                Additional Operator Remarks (Optional)
               </label>
               <input
                 type="text"
@@ -781,10 +837,23 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                className="flex-1 py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all"
+                disabled={!systemEval.isComplete || !receivingTime}
+                className={`flex-1 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
+                  !systemEval.isComplete || !receivingTime
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                    : systemEval.status === 'GOOD'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                }`}
               >
                 <Send className="w-4 h-4" />
-                <span>Submit Dynotest Record</span>
+                <span>
+                  {!receivingTime
+                    ? 'RECEIVE UNIT FIRST TO SUBMIT'
+                    : !systemEval.isComplete
+                    ? 'COMPLETE CHECKLIST TO SUBMIT'
+                    : 'SUBMIT DYNOTEST RESULT'}
+                </span>
               </button>
             </div>
           </div>

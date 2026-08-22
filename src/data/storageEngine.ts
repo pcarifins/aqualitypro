@@ -443,6 +443,14 @@ class DataStore {
 
   public async saveProductModel(model: ProductModel, actorName = 'Admin'): Promise<void> {
     const idx = this.models.findIndex((m) => m.id === model.id);
+    const previousValue = idx >= 0 ? this.models[idx] : null;
+
+    // FIRESTORE FIRST
+    await saveDocument(
+      'productModels',
+      model
+    );
+
     const isNew = idx < 0;
     if (idx >= 0) {
       this.models[idx] = model;
@@ -912,28 +920,38 @@ class DataStore {
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
 
-    const idx = this.gltRecords.findIndex((r) => r.id === record.id);
+    const recordToPersist: GLTRecord = {
+      ...record,
+      attemptNumber: record.attemptNumber || existingForJO.length + 1,
+    };
+
+    // 1. Firestore FIRST
+    await saveDocument('gltRecords', recordToPersist);
+
+    // 2. Only update local cache after Firestore succeeds
+    const idx = this.gltRecords.findIndex(
+      (r) => r.id === recordToPersist.id
+    );
+
     if (idx >= 0) {
-      this.gltRecords[idx] = record;
+      this.gltRecords[idx] = recordToPersist;
     } else {
-      if (!record.attemptNumber) {
-        record.attemptNumber = existingForJO.length + 1;
-      }
-      this.gltRecords.push(record);
+      this.gltRecords.push(recordToPersist);
     }
+
     this.saveToStorageCache();
 
-    await saveDocument('gltRecords', record);
     await logAuditEvent({
       action: 'SUBMIT_GLT_RECORD',
       collectionName: 'gltRecords',
-      documentId: record.id,
-      userName: record.operatorName || 'GLT Operator',
-      details: `Submitted GLT for JO ${record.joNumber} with result ${record.result}`,
-      newValue: record,
+      documentId: recordToPersist.id,
+      userName: recordToPersist.operatorName || 'GLT Operator',
+      details: `Submitted GLT for JO ${recordToPersist.joNumber} with result ${recordToPersist.result}`,
+      newValue: recordToPersist,
     });
+
     this.notifyListeners();
-    return record;
+    return recordToPersist;
   }
 
   // ==========================================
@@ -943,35 +961,48 @@ class DataStore {
     return this.dynoRecords;
   }
 
-  public async saveDynoRecord(record: DynotestRecord): Promise<DynotestRecord> {
+  public async saveDynoRecord(
+    record: DynotestRecord
+  ): Promise<DynotestRecord> {
+
     const existingForJO = this.dynoRecords.filter(
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
 
-    const idx = this.dynoRecords.findIndex((r) => r.id === record.id);
+    const recordToPersist: DynotestRecord = {
+      ...record,
+      attemptNumber: record.attemptNumber || existingForJO.length + 1,
+    };
+
+    // FIRESTORE FIRST
+    await saveDocument('dynoRecords', recordToPersist);
+
+    const idx = this.dynoRecords.findIndex(
+      (r) => r.id === recordToPersist.id
+    );
+
     if (idx >= 0) {
-      this.dynoRecords[idx] = record;
+      this.dynoRecords[idx] = recordToPersist;
     } else {
-      if (!record.attemptNumber) {
-        record.attemptNumber = existingForJO.length + 1;
-      }
-      this.dynoRecords.push(record);
+      this.dynoRecords.push(recordToPersist);
     }
+
     this.saveToStorageCache();
 
-    await saveDocument('dynoRecords', record);
     await logAuditEvent({
       action: 'SUBMIT_DYNO_RECORD',
       collectionName: 'dynoRecords',
-      documentId: record.id,
-      userName: record.operatorName || 'Dyno Operator',
-      details: `Submitted Dynotest for JO ${record.joNumber} with result ${record.result}`,
-      newValue: record,
+      documentId: recordToPersist.id,
+      userName: recordToPersist.operatorName || 'Dyno Operator',
+      details: `Submitted Dynotest for JO ${recordToPersist.joNumber} with result ${recordToPersist.result}`,
+      newValue: recordToPersist,
     });
 
-    this.finishQueueRecord(record.joNumber);
+    // IMPORTANT:
+    // DO NOT call finishQueueRecord here.
+
     this.notifyListeners();
-    return record;
+    return recordToPersist;
   }
 
   // ==========================================
@@ -981,35 +1012,48 @@ class DataStore {
     return this.hydraulicRecords;
   }
 
-  public async saveHydraulicRecord(record: HydraulicRecord): Promise<HydraulicRecord> {
+  public async saveHydraulicRecord(
+    record: HydraulicRecord
+  ): Promise<HydraulicRecord> {
+
     const existingForJO = this.hydraulicRecords.filter(
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
 
-    const idx = this.hydraulicRecords.findIndex((r) => r.id === record.id);
+    const recordToPersist: HydraulicRecord = {
+      ...record,
+      attemptNumber: record.attemptNumber || existingForJO.length + 1,
+    };
+
+    // FIRESTORE FIRST
+    await saveDocument('hydraulicRecords', recordToPersist);
+
+    const idx = this.hydraulicRecords.findIndex(
+      (r) => r.id === recordToPersist.id
+    );
+
     if (idx >= 0) {
-      this.hydraulicRecords[idx] = record;
+      this.hydraulicRecords[idx] = recordToPersist;
     } else {
-      if (!record.attemptNumber) {
-        record.attemptNumber = existingForJO.length + 1;
-      }
-      this.hydraulicRecords.push(record);
+      this.hydraulicRecords.push(recordToPersist);
     }
+
     this.saveToStorageCache();
 
-    await saveDocument('hydraulicRecords', record);
     await logAuditEvent({
       action: 'SUBMIT_TESTBENCH_RECORD',
       collectionName: 'hydraulicRecords',
-      documentId: record.id,
-      userName: record.operatorName || 'Testbench Operator',
-      details: `Submitted Hydraulic Testbench for JO ${record.joNumber} with result ${record.result}`,
-      newValue: record,
+      documentId: recordToPersist.id,
+      userName: recordToPersist.operatorName || 'Testbench Operator',
+      details: `Submitted Hydraulic Testbench for JO ${recordToPersist.joNumber} with result ${recordToPersist.result}`,
+      newValue: recordToPersist,
     });
 
-    this.finishQueueRecord(record.joNumber);
+    // IMPORTANT:
+    // DO NOT call finishQueueRecord here.
+
     this.notifyListeners();
-    return record;
+    return recordToPersist;
   }
 
   // ==========================================
@@ -1223,17 +1267,29 @@ class DataStore {
 
   public async updateQueueRecord(queueRecordId: string, updates: Partial<QueueRecord>): Promise<void> {
     const idx = this.queueRecords.findIndex((q) => q.queueRecordId === queueRecordId);
-    if (idx >= 0) {
-      this.queueRecords[idx] = {
-        ...this.queueRecords[idx],
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      };
-      this.saveToStorageCache();
-
-      await saveDocument('priorityQueue', this.queueRecords[idx]);
-      this.notifyListeners();
+    if (idx < 0) {
+      throw new Error(
+        `Queue record not found: ${queueRecordId}`
+      );
     }
+
+    const updatedRecord: QueueRecord = {
+      ...this.queueRecords[idx],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // FIRESTORE FIRST
+    await saveDocument(
+      'priorityQueue',
+      updatedRecord
+    );
+
+    // Then local cache
+    this.queueRecords[idx] = updatedRecord;
+
+    this.saveToStorageCache();
+    this.notifyListeners();
   }
 
   public async reorderQueue(

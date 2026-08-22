@@ -299,10 +299,6 @@ export default function App() {
     return record;
   };
 
-  const handleResetData = async () => {
-    await apiClient.resetSeedData();
-    await refreshData();
-  };
 
   const handleFormSuccessSubmitted = (joNum: string) => {
     refreshData();
@@ -355,7 +351,6 @@ export default function App() {
         users={users}
         onSwitchUser={handleSwitchUser}
         onLogout={handleLogout}
-        onResetData={handleResetData}
         onOpenSheetsModal={() => setShowSheetsModal(true)}
       />
 
@@ -496,10 +491,6 @@ export default function App() {
               const res = await apiClient.changePassword(userId, newPass);
               await refreshData();
               return res;
-            }}
-            onResetSeedData={async () => {
-              await apiClient.resetSeedData();
-              await refreshData();
             }}
           />
         )}

@@ -10,7 +10,6 @@ import {
   WifiOff,
   LogOut,
   FileSpreadsheet,
-  RefreshCw,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -18,7 +17,6 @@ interface NavbarProps {
   users: User[];
   onSwitchUser?: (user: User) => void;
   onLogout: () => void;
-  onResetData: () => void;
   onOpenDriveModal?: () => void;
   onOpenApkModal?: () => void;
   onOpenSheetsModal?: () => void;
@@ -27,11 +25,9 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onLogout,
-  onResetData,
   onOpenSheetsModal,
 }) => {
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
   useEffect(() => {
@@ -92,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {isOnline ? (
                 <>
                   <Database className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="hidden sm:inline text-[11px]">DB Sync</span>
+                  <span className="hidden sm:inline text-[11px]">Network</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 </>
               ) : (
@@ -139,13 +135,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {/* Reset Sample Data Button */}
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl border border-slate-200 transition-all"
-              title="Reset Sample Data"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
           </div>
         </div>
       </header>
@@ -220,41 +209,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Data Confirmation */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 text-slate-900 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center space-x-3 text-amber-600">
-              <AlertTriangle className="w-6 h-6 shrink-0" />
-              <h3 className="font-bold text-slate-900 text-base">Reset Master & Sample Data?</h3>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              This action will reset the local database to factory trial default records. All sample queue
-              items, checksheets, and test records will be restored.
-            </p>
-
-            <div className="flex space-x-3 pt-2">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold border border-slate-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  onResetData();
-                  setShowResetConfirm(false);
-                }}
-                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md"
-              >
-                Confirm Reset
               </button>
             </div>
           </div>
