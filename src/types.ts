@@ -25,6 +25,7 @@ export interface User {
   employeeId?: string;
   mustChangePassword?: boolean;
   active: boolean;
+  allowedCompGroups?: CompGroup[];
 }
 
 // Assembler Master (Assembly Mechanic is NOT a login role)

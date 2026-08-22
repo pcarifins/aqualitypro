@@ -44,3 +44,39 @@ export function getUserPermissions(user?: User | null): UserPermissions {
     canManageMasterData: isAdmin || isSupervisor,
   };
 }
+
+export function canUserAccessCompGroup(user?: User | null, compGroup?: string): boolean {
+  if (!user) return false;
+  const role = (user.role || '').toUpperCase();
+
+  // Admin, Supervisor, PPC, and QC can access all component groups
+  if (
+    role === 'ADMIN' ||
+    user.role === 'administrator' ||
+    role === 'SUPERVISOR' ||
+    user.role === 'supervisor' ||
+    role === 'PPC' ||
+    role === 'QC'
+  ) {
+    return true;
+  }
+
+  // If user has specific allowedCompGroups configured
+  if (user.allowedCompGroups && user.allowedCompGroups.length > 0) {
+    if (!compGroup) return true;
+    const targetComp = compGroup.toUpperCase();
+    return user.allowedCompGroups.some((group) => {
+      const gUpper = group.toUpperCase();
+      if (gUpper === 'ENGINE' && targetComp === 'ENGINE') return true;
+      if (
+        (gUpper === 'PT-PPM' || gUpper === 'POWER TRAIN' || gUpper === 'PPM') &&
+        (targetComp === 'PT-PPM' || targetComp === 'POWER TRAIN' || targetComp === 'CYLINDER' || targetComp === 'PPM')
+      ) {
+        return true;
+      }
+      return gUpper === targetComp;
+    });
+  }
+
+  return true;
+}

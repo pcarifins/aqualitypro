@@ -352,55 +352,61 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
   };
 
   const handleFinalSubmit = async () => {
-    const submissionTime = new Date().toISOString();
-    const finalDynoMinutes = receivingTime
-      ? calculateMinutesBetween(receivingTime, submissionTime)
-      : 0;
+    try {
+      const submissionTime = new Date().toISOString();
+      const finalDynoMinutes = receivingTime
+        ? calculateMinutesBetween(receivingTime, submissionTime)
+        : 0;
 
-    const answerSnapshots = buildAnswerSnapshots();
+      const answerSnapshots = buildAnswerSnapshots();
 
-    const recordToSave: DynotestRecord = {
-      id: `dyno-${Date.now()}`,
-      joNumber: joNumber.trim().toUpperCase(),
-      productCategory: 'Engine',
-      productModel: productModel || `${unitModel} / ${component}` || 'Engine Standard',
-      compGroup: 'Engine',
-      unitModel,
-      component,
-      assemblyMechanic,
-      testType,
-      operatorName: currentUser.name,
-      operatorId: currentUser.id,
-      receivingTime: receivingTime!,
-      submissionTime,
-      gltLeadTimeMinutes,
-      dynoLeadTimeMinutes: finalDynoMinutes,
-      result: finalResult,
-      status: 'Submitted',
-      attemptNumber,
-      answers: answerSnapshots,
-      ngItem: finalResult === 'NOT GOOD' ? ngItem : undefined,
-      ngDescription: finalResult === 'NOT GOOD' ? ngDescription : undefined,
-      photoUrl: photoUrl || undefined,
-      remarks,
-    };
+      const recordToSave: DynotestRecord = {
+        id: `dyno-${Date.now()}`,
+        joNumber: joNumber.trim().toUpperCase(),
+        productCategory: 'Engine',
+        productModel: productModel || `${unitModel} / ${component}` || 'Engine Standard',
+        compGroup: 'Engine',
+        unitModel,
+        component,
+        assemblyMechanic,
+        testType,
+        operatorName: currentUser.name,
+        operatorId: currentUser.id,
+        receivingTime: receivingTime!,
+        submissionTime,
+        gltLeadTimeMinutes,
+        dynoLeadTimeMinutes: finalDynoMinutes,
+        result: finalResult,
+        status: 'Submitted',
+        attemptNumber,
+        answers: answerSnapshots,
+        ngItem: finalResult === 'NOT GOOD' ? ngItem : undefined,
+        ngDescription: finalResult === 'NOT GOOD' ? ngDescription : undefined,
+        photoUrl: photoUrl || undefined,
+        remarks,
+      };
 
-    await onSaveRecord(recordToSave);
+      await onSaveRecord(recordToSave);
 
-    // Update Queue record
-    const targetQ =
-      selectedQueueId ||
-      queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
-        ?.queueRecordId;
+      // Update Queue record
+      const targetQ =
+        selectedQueueId ||
+        queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
+          ?.queueRecordId;
 
-    if (targetQ) {
-      store.updateQueueRecord(targetQ, {
-        status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
-      });
+      if (targetQ) {
+        await store.updateQueueRecord(targetQ, {
+          status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
+        });
+      }
+
+      setShowConfirmModal(false);
+      onSuccessSubmitted(joNumber);
+    } catch (error: any) {
+      console.error('Failed to submit Dynotest record:', error);
+      setValidationError(`Dynotest Submission Failed: ${error?.message || 'Firestore write error'}`);
+      setShowConfirmModal(false);
     }
-
-    setShowConfirmModal(false);
-    onSuccessSubmitted(joNumber);
   };
 
   return (

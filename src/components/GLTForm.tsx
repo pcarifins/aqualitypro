@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { formatDateTime } from '../utils/formatters';
 import { filterAssemblersByCompGroup } from '../utils/assemblerFilter';
+import { canUserAccessCompGroup } from '../utils/permissions';
 
 interface GLTFormProps {
   currentUser: User;
@@ -97,13 +98,14 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   // Load Queue & Assemblers
   useEffect(() => {
     apiClient.getQueueRecords().then((qList) => {
-      // Filter: PROD only, priority assigned, GLT not completed, active
+      // Filter: PROD only, priority assigned, GLT not completed, active, and matching operator role/allowedCompGroups
       const gltEligible = qList.filter(
         (q) =>
           q.testType === 'PROD' &&
           !q.isUrgentUnassigned &&
           q.gltStatus !== 'GOOD' &&
-          q.status !== 'FINISH'
+          q.status !== 'FINISH' &&
+          canUserAccessCompGroup(currentUser, q.compGroup)
       );
       setQueueRecords(gltEligible);
     });
@@ -111,7 +113,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     apiClient.getAssemblers(true).then((asms) => {
       setAssemblersList(asms);
     });
-  }, []);
+  }, [currentUser]);
 
   // Pre-select or lookup if preloadJONumber is passed
   useEffect(() => {
@@ -359,53 +361,59 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   };
 
   const handleFinalSubmit = async () => {
-    const answerSnapshots = buildAnswerSnapshots();
-    const submissionTime = new Date().toISOString();
+    try {
+      const answerSnapshots = buildAnswerSnapshots();
+      const submissionTime = new Date().toISOString();
 
-    const recordToSave: GLTRecord = {
-      id: `glt-${Date.now()}`,
-      joNumber: joNumber.trim().toUpperCase(),
-      productCategory,
-      productModel: productModel || `${unitModel} / ${component}` || 'Standard Model',
-      compGroup,
-      unitModel,
-      component,
-      partNumber,
-      serialNumber,
-      customer,
-      assemblyMechanic,
-      testDate,
-      result: finalResult,
-      status: 'Submitted',
-      attemptNumber,
-      answers: answerSnapshots,
-      ngItem: finalResult === 'NOT GOOD' ? ngItem : undefined,
-      ngDescription: finalResult === 'NOT GOOD' ? ngDescription : undefined,
-      photoUrl: photoUrl || undefined,
-      remarks,
-      operatorName: currentUser.name,
-      operatorId: currentUser.id,
-      incomingTime,
-      submissionTime,
-    };
+      const recordToSave: GLTRecord = {
+        id: `glt-${Date.now()}`,
+        joNumber: joNumber.trim().toUpperCase(),
+        productCategory,
+        productModel: productModel || `${unitModel} / ${component}` || 'Standard Model',
+        compGroup,
+        unitModel,
+        component,
+        partNumber,
+        serialNumber,
+        customer,
+        assemblyMechanic,
+        testDate,
+        result: finalResult,
+        status: 'Submitted',
+        attemptNumber,
+        answers: answerSnapshots,
+        ngItem: finalResult === 'NOT GOOD' ? ngItem : undefined,
+        ngDescription: finalResult === 'NOT GOOD' ? ngDescription : undefined,
+        photoUrl: photoUrl || undefined,
+        remarks,
+        operatorName: currentUser.name,
+        operatorId: currentUser.id,
+        incomingTime,
+        submissionTime,
+      };
 
-    await onSaveRecord(recordToSave);
+      await onSaveRecord(recordToSave);
 
-    // Update Queue record status if attached
-    const targetQ =
-      selectedQueueId ||
-      queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
-        ?.queueRecordId;
+      // Update Queue record status if attached
+      const targetQ =
+        selectedQueueId ||
+        queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
+          ?.queueRecordId;
 
-    if (targetQ) {
-      store.updateQueueRecord(targetQ, {
-        gltStatus: finalResult === 'GOOD' ? 'GOOD' : 'NOT_GOOD',
-        status: finalResult === 'GOOD' ? 'ON_PROCESS' : 'WAITING',
-      });
+      if (targetQ) {
+        await store.updateQueueRecord(targetQ, {
+          gltStatus: finalResult === 'GOOD' ? 'GOOD' : 'NOT_GOOD',
+          status: finalResult === 'GOOD' ? 'ON_PROCESS' : 'WAITING',
+        });
+      }
+
+      setShowConfirmModal(false);
+      onSuccessSubmitted(joNumber);
+    } catch (error: any) {
+      console.error('Failed to submit GLT record:', error);
+      setValidationError(`Submission Failed: ${error?.message || 'Firestore write error'}`);
+      setShowConfirmModal(false);
     }
-
-    setShowConfirmModal(false);
-    onSuccessSubmitted(joNumber);
   };
 
   return (
@@ -583,168 +591,183 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         </div>
       </div>
 
-      {/* SECTION 2: DYNAMIC CHECKSHEET ITEMS */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-            2. GLT Quality Inspection Checklist
-          </h3>
-          <span className="text-[11px] font-bold text-slate-500">
-            {checksheetItems.filter((i) => i.active !== false).length} Parameters
-          </span>
+      {/* GATING: Check if JO is selected */}
+      {!joNumber.trim() ? (
+        <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-6 text-center space-y-2.5 my-4 shadow-xs">
+          <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800">Select JO first to start GLT inspection.</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+            Please choose an authorized Job Order from the Priority Queue above to load the appropriate inspection checklist, parameters, and submission controls.
+          </p>
         </div>
-
-        <ChecksheetRenderer
-          items={checksheetItems}
-          answers={answers}
-          onAnswerChange={handleAnswerChange}
-          itemRemarks={itemRemarks}
-          onItemRemarkChange={handleItemRemarkChange}
-          validationAttempted={validationAttempted}
-        />
-      </div>
-
-      {/* SECTION 3: FINAL GLT RESULT SELECTION */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
-        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">
-          3. Final GLT Quality Result
-        </h3>
-
-        <div className="flex items-center space-x-4">
-          <button
-            type="button"
-            onClick={() => setFinalResult('GOOD')}
-            className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
-              finalResult === 'GOOD'
-                ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg ring-2 ring-emerald-500/30'
-                : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-            }`}
-          >
-            <CheckCircle2 className="w-5 h-5" />
-            <span>GOOD (Cleared for Testing)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setFinalResult('NOT GOOD')}
-            className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
-              finalResult === 'NOT GOOD'
-                ? 'bg-rose-600 border-rose-600 text-white shadow-lg ring-2 ring-rose-500/30'
-                : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-            }`}
-          >
-            <XCircle className="w-5 h-5" />
-            <span>NOT GOOD (NG)</span>
-          </button>
-        </div>
-
-        {/* NOT GOOD Sub-Form */}
-        {finalResult === 'NOT GOOD' && (
-          <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-4 space-y-3">
-            <div className="flex items-center space-x-2 text-rose-800 text-xs font-bold uppercase">
-              <AlertTriangle className="w-4 h-4 text-rose-600" />
-              <span>Defect Identification Details</span>
+      ) : (
+        <>
+          {/* SECTION 2: DYNAMIC CHECKSHEET ITEMS */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                2. GLT Quality Inspection Checklist
+              </h3>
+              <span className="text-[11px] font-bold text-slate-500">
+                {checksheetItems.filter((i) => i.active !== false).length} Parameters
+              </span>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                NG Defect Parameter <span className="text-rose-500">*</span>
-              </label>
-              <select
-                value={ngItem}
-                onChange={(e) => setNgItem(e.target.value)}
-                className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-rose-500"
+            <ChecksheetRenderer
+              items={checksheetItems}
+              answers={answers}
+              onAnswerChange={handleAnswerChange}
+              itemRemarks={itemRemarks}
+              onItemRemarkChange={handleItemRemarkChange}
+              validationAttempted={validationAttempted}
+            />
+          </div>
+
+          {/* SECTION 3: FINAL GLT RESULT SELECTION */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">
+              3. Final GLT Quality Result
+            </h3>
+
+            <div className="flex items-center space-x-4">
+              <button
+                type="button"
+                onClick={() => setFinalResult('GOOD')}
+                className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
+                  finalResult === 'GOOD'
+                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg ring-2 ring-emerald-500/30'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}
               >
-                <option value="">-- Select Defect Parameter --</option>
-                {checksheetItems.map((i) => (
-                  <option key={i.id} value={i.itemName}>
-                    [{i.section}] {i.itemName}
-                  </option>
-                ))}
-                <option value="Visual Surface Crack or Porosity">Visual Surface Crack or Porosity</option>
-                <option value="Flange Leakage Under Pressure">Flange Leakage Under Pressure</option>
-                <option value="Missing or Damaged O-Ring">Missing or Damaged O-Ring</option>
-                <option value="Other Assembly Defect">Other Assembly Defect</option>
-              </select>
+                <CheckCircle2 className="w-5 h-5" />
+                <span>GOOD (Cleared for Testing)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFinalResult('NOT GOOD')}
+                className={`flex-1 py-3 px-4 rounded-xl border font-black text-sm flex items-center justify-center space-x-2 transition-all ${
+                  finalResult === 'NOT GOOD'
+                    ? 'bg-rose-600 border-rose-600 text-white shadow-lg ring-2 ring-rose-500/30'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                <XCircle className="w-5 h-5" />
+                <span>NOT GOOD (NG)</span>
+              </button>
             </div>
+
+            {/* NOT GOOD Sub-Form */}
+            {finalResult === 'NOT GOOD' && (
+              <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center space-x-2 text-rose-800 text-xs font-bold uppercase">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  <span>Defect Identification Details</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    NG Defect Parameter <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={ngItem}
+                    onChange={(e) => setNgItem(e.target.value)}
+                    className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-rose-500"
+                  >
+                    <option value="">-- Select Defect Parameter --</option>
+                    {checksheetItems.map((i) => (
+                      <option key={i.id} value={i.itemName}>
+                        [{i.section}] {i.itemName}
+                      </option>
+                    ))}
+                    <option value="Visual Surface Crack or Porosity">Visual Surface Crack or Porosity</option>
+                    <option value="Flange Leakage Under Pressure">Flange Leakage Under Pressure</option>
+                    <option value="Missing or Damaged O-Ring">Missing or Damaged O-Ring</option>
+                    <option value="Other Assembly Defect">Other Assembly Defect</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    NG Description & Root Cause <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Describe failure details, measured values, or visual defect..."
+                    value={ngDescription}
+                    onChange={(e) => setNgDescription(e.target.value)}
+                    className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Attach Defect Photo (Optional)
+                  </label>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPhotoUrl(
+                          'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80'
+                        )
+                      }
+                      className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-2xs"
+                    >
+                      <Camera className="w-4 h-4 text-rose-500" />
+                      <span>Attach Inspection Photo</span>
+                    </button>
+                    {photoUrl && (
+                      <span className="text-xs text-emerald-600 font-semibold flex items-center space-x-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Photo Attached</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                NG Description & Root Cause <span className="text-rose-500">*</span>
+                Overall Inspection Remarks
               </label>
-              <textarea
-                rows={3}
-                placeholder="Describe failure details, measured values, or visual defect..."
-                value={ngDescription}
-                onChange={(e) => setNgDescription(e.target.value)}
-                className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-rose-500"
+              <input
+                type="text"
+                placeholder="e.g. Unit passed GLT inspection with zero leakage, ready for testing."
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:ring-2 focus:ring-blue-500"
               />
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Attach Defect Photo (Optional)
-              </label>
-              <div className="flex items-center space-x-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPhotoUrl(
-                      'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80'
-                    )
-                  }
-                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-2xs"
-                >
-                  <Camera className="w-4 h-4 text-rose-500" />
-                  <span>Attach Inspection Photo</span>
-                </button>
-                {photoUrl && (
-                  <span className="text-xs text-emerald-600 font-semibold flex items-center space-x-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Photo Attached</span>
-                  </span>
-                )}
-              </div>
+          {/* Sticky Bottom Action Area */}
+          <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 z-30 shadow-lg">
+            <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleSaveDraft}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center space-x-2 transition-colors shadow-2xs"
+              >
+                <Save className="w-4 h-4 text-amber-600" />
+                <span className="hidden xs:inline">Save Draft</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenConfirm}
+                className="flex-1 py-2.5 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all"
+              >
+                <FileCheck2 className="w-4 h-4" />
+                <span>SUBMIT GLT RESULT</span>
+              </button>
             </div>
           </div>
-        )}
-
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">
-            Overall Inspection Remarks
-          </label>
-          <input
-            type="text"
-            placeholder="e.g. Unit passed GLT inspection with zero leakage, ready for testing."
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      {/* Sticky Bottom Action Area */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 z-30 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleSaveDraft}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center space-x-2 transition-colors shadow-2xs"
-          >
-            <Save className="w-4 h-4 text-amber-600" />
-            <span className="hidden xs:inline">Save Draft</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleOpenConfirm}
-            className="flex-1 py-2.5 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all"
-          >
-            <FileCheck2 className="w-4 h-4" />
-            <span>Submit GLT Record</span>
-          </button>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
