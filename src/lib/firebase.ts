@@ -1,0 +1,40 @@
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  initializeFirestore,
+  getFirestore,
+  memoryLocalCache,
+} from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+// Correctly specify firestoreDatabaseId if configured
+export const db = (function () {
+  try {
+    if (firebaseConfig.firestoreDatabaseId) {
+      return initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+      }, firebaseConfig.firestoreDatabaseId);
+    } else {
+      return initializeFirestore(app, {
+        localCache: memoryLocalCache(),
+      });
+    }
+  } catch {
+    return firebaseConfig.firestoreDatabaseId
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+  }
+})();
+
+export const auth = getAuth(app);
+
+// Workspace OAuth Provider (Google Sheets & Drive integration)
+export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+googleAuthProvider.addScope('https://www.googleapis.com/auth/drive.file');
+googleAuthProvider.addScope('https://www.googleapis.com/auth/drive.readonly');
+googleAuthProvider.setCustomParameters({
+  prompt: 'select_account',
+});

@@ -1,0 +1,10 @@
+{
+  "name": "AQuality PRO",
+  "description": "Component Quality Control & Testing System for Engine (GLT & Dynotest), PT-PPM & Cylinder (GLT & Testbench) with Priority Queue and Analytics.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

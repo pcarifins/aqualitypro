@@ -1,0 +1,105 @@
+{
+  "schema": {
+    "users": {
+      "description": "User accounts for Quality KRA app",
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "username": "string",
+        "role": "string",
+        "jobGroup": "string",
+        "jobStatus": "string",
+        "active": "boolean"
+      }
+    },
+    "productModels": {
+      "description": "Product models configuration",
+      "fields": {
+        "id": "string",
+        "code": "string",
+        "name": "string"
+      }
+    },
+    "checksheets": {
+      "description": "Inspection checksheets",
+      "fields": {
+        "id": "string",
+        "process": "string",
+        "category": "string",
+        "itemName": "string",
+        "active": "boolean"
+      }
+    },
+    "gltRecords": {
+      "description": "GLT Inspection Records",
+      "fields": {
+        "id": "string",
+        "joNumber": "string",
+        "status": "string",
+        "timestamp": "string"
+      }
+    },
+    "dynoRecords": {
+      "description": "Dynotest Records",
+      "fields": {
+        "id": "string",
+        "joNumber": "string",
+        "status": "string",
+        "timestamp": "string"
+      }
+    },
+    "hydraulicRecords": {
+      "description": "Hydraulic Testing Records",
+      "fields": {
+        "id": "string",
+        "joNumber": "string",
+        "status": "string",
+        "timestamp": "string"
+      }
+    }
+  },
+  "rules": [
+    {
+      "collection": "users",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    {
+      "collection": "productModels",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    {
+      "collection": "checksheets",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    {
+      "collection": "gltRecords",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    {
+      "collection": "dynoRecords",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    {
+      "collection": "hydraulicRecords",
+      "allow": {
+        "read": "true",
+        "write": "true"
+      }
+    }
+  ]
+}
