@@ -833,25 +833,13 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
                 className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:ring-2 focus:ring-cyan-500"
               />
             </div>
-          </div>
 
-          {/* Sticky Bottom Action Area */}
-          <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 z-30 shadow-lg">
-            <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handleSaveDraft}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center space-x-2 transition-colors shadow-2xs"
-              >
-                <Save className="w-4 h-4 text-amber-600" />
-                <span className="hidden xs:inline">Save Draft</span>
-              </button>
-
+            <div className="pt-4 border-t border-slate-200">
               <button
                 type="button"
                 onClick={handleOpenConfirm}
                 disabled={!systemEval.isComplete || !receivingTime}
-                className={`flex-1 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
+                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
                   !systemEval.isComplete || !receivingTime
                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                     : systemEval.status === 'GOOD'
@@ -859,7 +847,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
                     : 'bg-rose-600 hover:bg-rose-700 text-white'
                 }`}
               >
-                <Send className="w-4 h-4" />
+                <Send className="w-5 h-5" />
+
                 <span>
                   {!receivingTime
                     ? 'RECEIVE UNIT FIRST TO SUBMIT'
