@@ -7,6 +7,8 @@ import {
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+export { firebaseConfig };
+
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Correctly specify firestoreDatabaseId if configured

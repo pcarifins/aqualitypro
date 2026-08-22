@@ -11,20 +11,20 @@ import {
   Users,
   Wrench,
   Layers,
-  ShieldCheck,
-  ClipboardList,
   Database,
   RotateCcw,
-  Sparkles,
   FileSpreadsheet,
+  Activity,
 } from 'lucide-react';
 
 import { AssemblerMasterTab } from './admin/AssemblerMasterTab';
 import { ProductMasterTab } from './admin/ProductMasterTab';
 import { ChecksheetMasterTab } from './admin/ChecksheetMasterTab';
 import { UserMasterTab } from './admin/UserMasterTab';
+import { DatabaseSyncTest } from './DatabaseSyncTest';
 
 interface AdminPanelProps {
+  currentUser: User;
   users: User[];
   assemblers: Assembler[];
   productModels: ProductModel[];
@@ -47,6 +47,7 @@ interface AdminPanelProps {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
+  currentUser,
   users,
   assemblers,
   productModels,
@@ -67,7 +68,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onOpenSheetsModal,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'assembler' | 'product' | 'checksheet' | 'users'
+    'assembler' | 'product' | 'checksheet' | 'users' | 'sync'
   >('checksheet');
 
   const [resetModalOpen, setResetModalOpen] = useState(false);
@@ -202,6 +203,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             {users.length}
           </span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('sync')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'sync'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-emerald-500" />
+          <span>Database Sync Test</span>
+        </button>
       </div>
 
       {/* Tab Panels */}
@@ -239,6 +253,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           onDeleteUser={onDeleteUser}
           onChangePassword={onChangePassword}
         />
+      )}
+
+      {activeTab === 'sync' && (
+        <DatabaseSyncTest currentUser={currentUser} />
       )}
 
       {/* Reset Seed Confirmation Modal */}

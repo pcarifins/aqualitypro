@@ -36,10 +36,12 @@ import { INITIAL_REQUIRED_PRODUCT_MODELS } from './productMasterSeed';
 import { initialQueueRecords } from './initialQueueData';
 import { computeUnifiedAnalytics } from '../services/analyticsService';
 
-import { calculateMinutesBetween } from '../utils/formatters';
 import {
   saveDocument,
   removeDocument,
+  subscribeToCollection,
+  logAuditEvent,
+  initializeAndMigrateFirestore,
 } from '../lib/firestoreSync';
 
 const STORAGE_KEYS = {
@@ -69,7 +71,6 @@ const setStorage = (key: string, val: string): void => {
   }
 };
 
-// Internal memory store with LocalStorage persistence & Firestore Sync support
 class DataStore {
   private users: User[] = [];
   private assemblers: Assembler[] = [];
@@ -82,62 +83,175 @@ class DataStore {
   private queueRecords: QueueRecord[] = [];
   private pdfReports: PDFTestReportRecord[] = [];
   private certificates: QualityCertificateRecord[] = [];
+  private auditLogs: any[] = [];
+
+  private listeners: (() => void)[] = [];
+  private isInitialized = false;
+  private unsubscribeFuncs: (() => void)[] = [];
 
   constructor() {
-    this.loadFromStorage();
+    this.loadFromStorageCache();
   }
 
-  private loadFromStorage() {
+  // Subscribe to changes in DataStore (for React re-renders)
+  public subscribe(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifyListeners() {
+    this.listeners.forEach((l) => l());
+  }
+
+  // Initialize Realtime Firestore Synchronization across all connected devices
+  public async initializeRealtimeSync(): Promise<void> {
+    if (this.isInitialized) return;
+    this.isInitialized = true;
+
+    // 1. One-time migration if needed
+    await initializeAndMigrateFirestore();
+
+    // 2. Set up realtime listeners for all collections
+    const unSubUsers = subscribeToCollection<User>('users', (data) => {
+      if (data && data.length > 0) {
+        this.users = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubAssemblers = subscribeToCollection<Assembler>('assemblers', (data) => {
+      if (data && data.length > 0) {
+        this.assemblers = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubModels = subscribeToCollection<ProductModel>('productModels', (data) => {
+      if (data && data.length > 0) {
+        this.models = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubTemplates = subscribeToCollection<ChecksheetTemplate>('checksheetTemplates', (data) => {
+      if (data && data.length > 0) {
+        this.templates = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubChecksheets = subscribeToCollection<ChecksheetItem>('checksheets', (data) => {
+      if (data && data.length > 0) {
+        this.checksheets = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubQueue = subscribeToCollection<QueueRecord>('priorityQueue', (data) => {
+      if (data && data.length > 0) {
+        // preserve field fallback
+        this.queueRecords = data.map((q) => ({
+          ...q,
+          queueRecordId: q.queueRecordId || (q as any).id,
+        }));
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubGLT = subscribeToCollection<GLTRecord>('gltRecords', (data) => {
+      if (data && data.length > 0) {
+        this.gltRecords = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubDyno = subscribeToCollection<DynotestRecord>('dynoRecords', (data) => {
+      if (data && data.length > 0) {
+        this.dynoRecords = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubHydraulic = subscribeToCollection<HydraulicRecord>('hydraulicRecords', (data) => {
+      if (data && data.length > 0) {
+        this.hydraulicRecords = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubReports = subscribeToCollection<PDFTestReportRecord>('pdfReports', (data) => {
+      if (data) {
+        this.pdfReports = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubCertificates = subscribeToCollection<QualityCertificateRecord>('certificates', (data) => {
+      if (data) {
+        this.certificates = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
+    const unSubAudit = subscribeToCollection<any>('auditLogs', (data) => {
+      if (data) {
+        this.auditLogs = data;
+        this.notifyListeners();
+      }
+    });
+
+    this.unsubscribeFuncs = [
+      unSubUsers,
+      unSubAssemblers,
+      unSubModels,
+      unSubTemplates,
+      unSubChecksheets,
+      unSubQueue,
+      unSubGLT,
+      unSubDyno,
+      unSubHydraulic,
+      unSubReports,
+      unSubCertificates,
+      unSubAudit,
+    ];
+  }
+
+  public cleanupSync() {
+    this.unsubscribeFuncs.forEach((fn) => fn());
+    this.unsubscribeFuncs = [];
+    this.isInitialized = false;
+  }
+
+  private loadFromStorageCache() {
     try {
-      // 1. Users
       const u = getStorage(STORAGE_KEYS.USERS);
-      const parsedUsers: User[] = u ? JSON.parse(u) : [...initialUsers];
-      const existingUsernames = new Set(parsedUsers.map((usr) => usr.username.toLowerCase()));
+      this.users = u ? JSON.parse(u) : [...initialUsers];
 
-      initialUsers.forEach((initUser) => {
-        if (!existingUsernames.has(initUser.username.toLowerCase())) {
-          parsedUsers.push(initUser);
-        }
-      });
-      this.users = parsedUsers;
-
-      // 2. Assemblers
       const a = getStorage(STORAGE_KEYS.ASSEMBLERS);
       this.assemblers = a ? JSON.parse(a) : [...initialAssemblers];
 
-      // 3. Product Models - Idempotent merge with all 169 required models
       const m = getStorage(STORAGE_KEYS.MODELS);
-      let parsedModels: ProductModel[] = m ? JSON.parse(m) : [...initialProductModels];
+      this.models = m ? JSON.parse(m) : [...initialProductModels, ...INITIAL_REQUIRED_PRODUCT_MODELS];
 
-      const modelKeySet = new Set(
-        parsedModels.map(
-          (mod) =>
-            `${mod.compGroup || mod.category}_${(mod.subGroup || '')}_${mod.unitModel.trim().toUpperCase()}_${mod.component.trim().toUpperCase()}`
-        )
-      );
-
-      INITIAL_REQUIRED_PRODUCT_MODELS.forEach((reqModel) => {
-        const key = `${reqModel.compGroup}_${(reqModel.subGroup || '')}_${reqModel.unitModel.trim().toUpperCase()}_${reqModel.component.trim().toUpperCase()}`;
-        if (!modelKeySet.has(key)) {
-          parsedModels.push(reqModel);
-          modelKeySet.add(key);
-        }
-      });
-
-      this.models = parsedModels;
-
-      // 4. Checksheet Templates
       const t = getStorage(STORAGE_KEYS.TEMPLATES);
       this.templates = t ? JSON.parse(t) : [...initialChecksheetTemplates];
 
-      // Ensure starter checksheets exist for all active products
-      this.ensureStarterChecksheetsForAllActiveProducts();
-
-      // Flat items backward compatibility
       const c = getStorage(STORAGE_KEYS.CHECKSHEETS);
       this.checksheets = c ? JSON.parse(c) : [...initialChecksheetItems];
 
-      // Records
       const g = getStorage(STORAGE_KEYS.GLT);
       this.gltRecords = g ? JSON.parse(g) : [...initialGLTRecords];
 
@@ -147,15 +261,12 @@ class DataStore {
       const h = getStorage(STORAGE_KEYS.HYDRAULIC);
       this.hydraulicRecords = h ? JSON.parse(h) : [...initialHydraulicRecords];
 
-      // Queue Records
       const q = getStorage(STORAGE_KEYS.QUEUE);
       this.queueRecords = q ? JSON.parse(q) : [...initialQueueRecords];
 
-      // PDF Reports
       const rep = getStorage(STORAGE_KEYS.PDF_REPORTS);
       this.pdfReports = rep ? JSON.parse(rep) : [];
 
-      // Certificates
       const cert = getStorage(STORAGE_KEYS.CERTIFICATES);
       this.certificates = cert ? JSON.parse(cert) : [];
     } catch {
@@ -163,7 +274,7 @@ class DataStore {
     }
   }
 
-  public saveToStorage() {
+  private saveToStorageCache() {
     try {
       setStorage(STORAGE_KEYS.USERS, JSON.stringify(this.users));
       setStorage(STORAGE_KEYS.ASSEMBLERS, JSON.stringify(this.assemblers));
@@ -176,46 +287,7 @@ class DataStore {
       setStorage(STORAGE_KEYS.QUEUE, JSON.stringify(this.queueRecords));
       setStorage(STORAGE_KEYS.PDF_REPORTS, JSON.stringify(this.pdfReports));
       setStorage(STORAGE_KEYS.CERTIFICATES, JSON.stringify(this.certificates));
-    } catch {
-      // Ignore storage limit errors
-    }
-  }
-
-  public exportFullDatabase() {
-    return {
-      appName: 'AQuality PRO System',
-      schemaVersion: 2,
-      exportedAt: new Date().toISOString(),
-      users: this.users,
-      assemblers: this.assemblers,
-      models: this.models,
-      templates: this.templates,
-      checksheets: this.checksheets,
-      gltRecords: this.gltRecords,
-      dynoRecords: this.dynoRecords,
-      hydraulicRecords: this.hydraulicRecords,
-      queueRecords: this.queueRecords,
-      pdfReports: this.pdfReports,
-      certificates: this.certificates,
-    };
-  }
-
-  public importFullDatabase(data: any) {
-    if (!data || typeof data !== 'object') {
-      throw new Error('Invalid database format.');
-    }
-    if (Array.isArray(data.users)) this.users = data.users;
-    if (Array.isArray(data.assemblers)) this.assemblers = data.assemblers;
-    if (Array.isArray(data.models)) this.models = data.models;
-    if (Array.isArray(data.templates)) this.templates = data.templates;
-    if (Array.isArray(data.checksheets)) this.checksheets = data.checksheets;
-    if (Array.isArray(data.gltRecords)) this.gltRecords = data.gltRecords;
-    if (Array.isArray(data.dynoRecords)) this.dynoRecords = data.dynoRecords;
-    if (Array.isArray(data.hydraulicRecords)) this.hydraulicRecords = data.hydraulicRecords;
-    if (Array.isArray(data.queueRecords)) this.queueRecords = data.queueRecords;
-    if (Array.isArray(data.pdfReports)) this.pdfReports = data.pdfReports;
-    if (Array.isArray(data.certificates)) this.certificates = data.certificates;
-    this.saveToStorage();
+    } catch {}
   }
 
   public resetToDefault() {
@@ -223,7 +295,6 @@ class DataStore {
     this.assemblers = [...initialAssemblers];
     this.models = [...initialProductModels, ...INITIAL_REQUIRED_PRODUCT_MODELS];
     this.templates = [...initialChecksheetTemplates];
-    this.ensureStarterChecksheetsForAllActiveProducts();
     this.checksheets = [...initialChecksheetItems];
     this.gltRecords = [...initialGLTRecords];
     this.dynoRecords = [...initialDynotestRecords];
@@ -231,7 +302,8 @@ class DataStore {
     this.queueRecords = [...initialQueueRecords];
     this.pdfReports = [];
     this.certificates = [];
-    this.saveToStorage();
+    this.saveToStorageCache();
+    this.notifyListeners();
   }
 
   // ==========================================
@@ -245,36 +317,71 @@ class DataStore {
     return this.users.find((u) => u.id === id);
   }
 
-  public saveUser(user: User) {
+  public async saveUser(user: User, actorName = 'Admin'): Promise<void> {
     const idx = this.users.findIndex((u) => u.id === user.id);
+    const isNew = idx < 0;
+    const prev = isNew ? null : this.users[idx];
+
     if (idx >= 0) {
       this.users[idx] = { ...this.users[idx], ...user };
     } else {
       this.users.push(user);
     }
-    this.saveToStorage();
-    saveDocument('users', user);
+    this.saveToStorageCache();
+
+    await saveDocument('users', user);
+    await logAuditEvent({
+      action: isNew ? 'CREATE_USER' : 'UPDATE_USER',
+      collectionName: 'users',
+      documentId: user.id,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} user ${user.username} (${user.role})`,
+      previousValue: prev,
+      newValue: user,
+    });
+    this.notifyListeners();
   }
 
-  public deleteUser(id: string) {
+  public async deleteUser(id: string, actorName = 'Admin'): Promise<void> {
+    const target = this.users.find((u) => u.id === id);
     this.users = this.users.filter((u) => u.id !== id);
-    this.saveToStorage();
-    removeDocument('users', id);
+    this.saveToStorageCache();
+
+    await removeDocument('users', id);
+    if (target) {
+      await logAuditEvent({
+        action: 'DELETE_USER',
+        collectionName: 'users',
+        documentId: id,
+        userName: actorName,
+        details: `Deleted user ${target.username}`,
+        previousValue: target,
+      });
+    }
+    this.notifyListeners();
   }
 
-  public changeUserPassword(userId: string, newPass: string): boolean {
+  public async changeUserPassword(userId: string, newPass: string, actorName = 'Admin'): Promise<boolean> {
     const user = this.users.find((u) => u.id === userId);
     if (user) {
       user.password = newPass;
-      this.saveToStorage();
-      saveDocument('users', user);
+      this.saveToStorageCache();
+      await saveDocument('users', user);
+      await logAuditEvent({
+        action: 'CHANGE_PASSWORD',
+        collectionName: 'users',
+        documentId: userId,
+        userName: actorName,
+        details: `Changed password for user ${user.username}`,
+      });
+      this.notifyListeners();
       return true;
     }
     return false;
   }
 
   // ==========================================
-  // --- ASSEMBLER MASTER (Assembly Mechanic is NOT login user) ---
+  // --- ASSEMBLERS ---
   // ==========================================
   public getAssemblers(onlyActive = false): Assembler[] {
     if (onlyActive) {
@@ -283,21 +390,45 @@ class DataStore {
     return this.assemblers;
   }
 
-  public saveAssembler(assembler: Assembler) {
+  public async saveAssembler(assembler: Assembler, actorName = 'Admin'): Promise<void> {
     const idx = this.assemblers.findIndex((a) => a.id === assembler.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
       this.assemblers[idx] = assembler;
     } else {
       this.assemblers.push(assembler);
     }
-    this.saveToStorage();
-    saveDocument('assemblers', assembler);
+    this.saveToStorageCache();
+
+    await saveDocument('assemblers', assembler);
+    await logAuditEvent({
+      action: isNew ? 'CREATE_ASSEMBLER' : 'UPDATE_ASSEMBLER',
+      collectionName: 'assemblers',
+      documentId: assembler.id,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} assembler ${assembler.name}`,
+      newValue: assembler,
+    });
+    this.notifyListeners();
   }
 
-  public deleteAssembler(id: string) {
+  public async deleteAssembler(id: string, actorName = 'Admin'): Promise<void> {
+    const target = this.assemblers.find((a) => a.id === id);
     this.assemblers = this.assemblers.filter((a) => a.id !== id);
-    this.saveToStorage();
-    removeDocument('assemblers', id);
+    this.saveToStorageCache();
+
+    await removeDocument('assemblers', id);
+    if (target) {
+      await logAuditEvent({
+        action: 'DELETE_ASSEMBLER',
+        collectionName: 'assemblers',
+        documentId: id,
+        userName: actorName,
+        details: `Deleted assembler ${target.name}`,
+        previousValue: target,
+      });
+    }
+    this.notifyListeners();
   }
 
   // ==========================================
@@ -310,24 +441,47 @@ class DataStore {
     return this.models;
   }
 
-  public saveProductModel(model: ProductModel) {
+  public async saveProductModel(model: ProductModel, actorName = 'Admin'): Promise<void> {
     const idx = this.models.findIndex((m) => m.id === model.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
       this.models[idx] = model;
     } else {
       this.models.push(model);
     }
-    this.saveToStorage();
-    saveDocument('productModels', model);
+    this.saveToStorageCache();
+
+    await saveDocument('productModels', model);
+    await logAuditEvent({
+      action: isNew ? 'CREATE_PRODUCT_MODEL' : 'UPDATE_PRODUCT_MODEL',
+      collectionName: 'productModels',
+      documentId: model.id,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} model ${model.unitModel} / ${model.component}`,
+      newValue: model,
+    });
+    this.notifyListeners();
   }
 
-  public deleteProductModel(id: string) {
+  public async deleteProductModel(id: string, actorName = 'Admin'): Promise<void> {
+    const target = this.models.find((m) => m.id === id);
     this.models = this.models.filter((m) => m.id !== id);
-    this.saveToStorage();
-    removeDocument('productModels', id);
+    this.saveToStorageCache();
+
+    await removeDocument('productModels', id);
+    if (target) {
+      await logAuditEvent({
+        action: 'DELETE_PRODUCT_MODEL',
+        collectionName: 'productModels',
+        documentId: id,
+        userName: actorName,
+        details: `Deleted model ${target.unitModel} / ${target.component}`,
+        previousValue: target,
+      });
+    }
+    this.notifyListeners();
   }
 
-  // Validate that all 169 Product Master requirements are met
   public validateProductMaster(): ProductMasterValidationReport {
     let engineCount = 0;
     let ptCount = 0;
@@ -370,7 +524,6 @@ class DataStore {
     };
   }
 
-  // Ensure every active product model has at least a starter checksheet template
   public ensureStarterChecksheetsForAllActiveProducts(): {
     createdCount: number;
     alreadyExistingCount: number;
@@ -384,8 +537,6 @@ class DataStore {
       const testStage: TestProcess =
         model.compGroup === 'Engine'
           ? 'Dynotest'
-          : model.compGroup === 'Cylinder'
-          ? 'Hydraulic Test'
           : 'Hydraulic Test';
 
       const existing = this.templates.find(
@@ -433,15 +584,6 @@ class DataStore {
                   active: true,
                   mandatory: true,
                 },
-                {
-                  id: `itm-vis-3-${model.id}`,
-                  itemName: 'Port Plugs & Seal Orientation Check',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: true,
-                },
               ],
             },
             {
@@ -451,59 +593,13 @@ class DataStore {
               items: [
                 {
                   id: `itm-perf-1-${model.id}`,
-                  itemName: 'Operating Oil Temperature',
+                  itemName: 'Operating Pressure / Load Check',
                   inputType: 'NUMERIC',
-                  unit: '°C',
+                  unit: model.compGroup === 'Engine' ? 'kW' : 'bar',
                   validation: 'RANGE',
-                  minimumValue: 45,
-                  maximumValue: 65,
+                  minimumValue: model.compGroup === 'Engine' ? 100 : 150,
+                  maximumValue: model.compGroup === 'Engine' ? 500 : 350,
                   displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-perf-2-${model.id}`,
-                  itemName: 'Main Circuit Relief Pressure',
-                  inputType: 'NUMERIC',
-                  unit: 'bar',
-                  validation: 'RANGE',
-                  minimumValue: 180,
-                  maximumValue: 240,
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-perf-3-${model.id}`,
-                  itemName: 'Internal / External Leakage Check',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: true,
-                },
-              ],
-            },
-            {
-              id: `sec-sign-${model.id}`,
-              name: 'Final Quality Sign-off',
-              displayOrder: 3,
-              items: [
-                {
-                  id: `itm-sign-1-${model.id}`,
-                  itemName: 'No Abnormal Vibration or Noise',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-sign-2-${model.id}`,
-                  itemName: 'Final Cosmetic & Paint Condition',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
                   active: true,
                   mandatory: true,
                 },
@@ -512,43 +608,37 @@ class DataStore {
           ],
         };
         this.templates.push(starterTemplate);
+        saveDocument('checksheetTemplates', starterTemplate);
       } else {
         alreadyExistingCount++;
       }
     });
 
+    this.saveToStorageCache();
+    this.notifyListeners();
     return { createdCount, alreadyExistingCount };
   }
 
-  // Bulk activate all starter templates that don't have an active counterpart
   public bulkActivateStarterTemplates(): number {
     let activatedCount = 0;
     this.templates.forEach((t) => {
       if (t.status === 'DRAFT') {
-        const hasActive = this.templates.some(
-          (other) =>
-            other.id !== t.id &&
-            other.compGroup === t.compGroup &&
-            other.component.toLowerCase() === t.component.toLowerCase() &&
-            other.unitModel === t.unitModel &&
-            other.status === 'ACTIVE'
-        );
-        if (!hasActive) {
-          t.status = 'ACTIVE';
-          t.activatedAt = new Date().toISOString();
-          t.updatedAt = new Date().toISOString();
-          activatedCount++;
-        }
+        t.status = 'ACTIVE';
+        t.activatedAt = new Date().toISOString();
+        t.updatedAt = new Date().toISOString();
+        saveDocument('checksheetTemplates', t);
+        activatedCount++;
       }
     });
     if (activatedCount > 0) {
-      this.saveToStorage();
+      this.saveToStorageCache();
+      this.notifyListeners();
     }
     return activatedCount;
   }
 
   // ==========================================
-  // --- CHECKSHEET MASTER (Hierarchy: Comp Group -> Unit -> Component -> Test Stage -> Template -> Section -> Item) ---
+  // --- CHECKSHEET TEMPLATES ---
   // ==========================================
   public getChecksheetTemplates(filter?: {
     compGroup?: CompGroup;
@@ -559,23 +649,15 @@ class DataStore {
   }): ChecksheetTemplate[] {
     let list = [...this.templates];
     if (filter) {
-      if (filter.compGroup) {
-        list = list.filter((t) => t.compGroup === filter.compGroup);
-      }
+      if (filter.compGroup) list = list.filter((t) => t.compGroup === filter.compGroup);
       if (filter.unitModel && filter.unitModel !== 'ALL') {
         list = list.filter((t) => t.unitModel === filter.unitModel || t.unitModel === 'ALL');
       }
       if (filter.component) {
-        list = list.filter(
-          (t) => t.component.toLowerCase() === filter.component?.toLowerCase()
-        );
+        list = list.filter((t) => t.component.toLowerCase() === filter.component?.toLowerCase());
       }
-      if (filter.testStage) {
-        list = list.filter((t) => t.testStage === filter.testStage);
-      }
-      if (filter.status) {
-        list = list.filter((t) => t.status === filter.status);
-      }
+      if (filter.testStage) list = list.filter((t) => t.testStage === filter.testStage);
+      if (filter.status) list = list.filter((t) => t.status === filter.status);
     }
     return list;
   }
@@ -584,7 +666,6 @@ class DataStore {
     return this.templates.find((t) => t.id === id);
   }
 
-  // Find active template for test execution (e.g. MAIN PUMP vs SWING MOTOR vs Engine Assembly)
   public getActiveTemplate(
     compGroup: CompGroup | string,
     unitModel: string,
@@ -594,7 +675,6 @@ class DataStore {
     const compKey = (component || '').trim().toLowerCase();
     const unitKey = (unitModel || '').trim().toUpperCase();
 
-    // 1. Try exact unit + component match
     const exactMatch = this.templates.find(
       (t) =>
         t.status === 'ACTIVE' &&
@@ -604,7 +684,6 @@ class DataStore {
     );
     if (exactMatch) return exactMatch;
 
-    // 2. Try component match with unitModel = 'ALL'
     const allUnitMatch = this.templates.find(
       (t) =>
         t.status === 'ACTIVE' &&
@@ -614,7 +693,6 @@ class DataStore {
     );
     if (allUnitMatch) return allUnitMatch;
 
-    // 3. Fallback: match by compGroup & testStage if component is generic
     const compGroupMatch = this.templates.find(
       (t) =>
         t.status === 'ACTIVE' &&
@@ -622,13 +700,11 @@ class DataStore {
         (t.compGroup === compGroup ||
           (compGroup.includes('Engine') && t.compGroup === 'Engine') ||
           (compGroup.includes('PT') && t.compGroup === 'PT-PPM') ||
-          (compGroup.includes('Power Train') && t.compGroup === 'PT-PPM') ||
           (compGroup.includes('Cylinder') && t.compGroup === 'Cylinder'))
     );
     return compGroupMatch || null;
   }
 
-  // Create immutable snapshot from template
   public createSnapshotFromTemplate(template: ChecksheetTemplate): ChecksheetSnapshot {
     return {
       templateId: template.id,
@@ -645,7 +721,7 @@ class DataStore {
           name: sec.name,
           displayOrder: sec.displayOrder,
           items: sec.items
-            .filter((item) => item.active) // only include active items in new tests
+            .filter((item) => item.active)
             .sort((a, b) => a.displayOrder - b.displayOrder)
             .map((item) => ({
               id: item.id,
@@ -666,7 +742,7 @@ class DataStore {
     };
   }
 
-  public saveChecksheetTemplate(template: ChecksheetTemplate) {
+  public async saveChecksheetTemplate(template: ChecksheetTemplate, actorName = 'Admin'): Promise<void> {
     const idx = this.templates.findIndex((t) => t.id === template.id);
     template.updatedAt = new Date().toISOString();
     if (idx >= 0) {
@@ -674,15 +750,24 @@ class DataStore {
     } else {
       this.templates.push(template);
     }
-    this.saveToStorage();
-    saveDocument('checksheetTemplates', template);
+    this.saveToStorageCache();
+
+    await saveDocument('checksheetTemplates', template);
+    await logAuditEvent({
+      action: idx >= 0 ? 'UPDATE_CHECKSHEET_TEMPLATE' : 'CREATE_CHECKSHEET_TEMPLATE',
+      collectionName: 'checksheetTemplates',
+      documentId: template.id,
+      userName: actorName,
+      details: `Saved template ${template.name}`,
+      newValue: template,
+    });
+    this.notifyListeners();
   }
 
-  public activateChecksheetTemplate(templateId: string) {
+  public async activateChecksheetTemplate(templateId: string, actorName = 'Admin'): Promise<void> {
     const target = this.templates.find((t) => t.id === templateId);
     if (!target) return;
 
-    // Archive or de-activate other templates with the same compGroup, unitModel, component, testStage
     this.templates.forEach((t) => {
       if (
         t.id !== templateId &&
@@ -693,6 +778,7 @@ class DataStore {
       ) {
         t.status = 'ARCHIVED';
         t.updatedAt = new Date().toISOString();
+        saveDocument('checksheetTemplates', t);
       }
     });
 
@@ -700,11 +786,19 @@ class DataStore {
     target.activatedAt = new Date().toISOString();
     target.updatedAt = new Date().toISOString();
 
-    this.saveToStorage();
-    saveDocument('checksheetTemplates', target);
+    this.saveToStorageCache();
+    await saveDocument('checksheetTemplates', target);
+    await logAuditEvent({
+      action: 'ACTIVATE_CHECKSHEET_TEMPLATE',
+      collectionName: 'checksheetTemplates',
+      documentId: templateId,
+      userName: actorName,
+      details: `Activated template ${target.name}`,
+    });
+    this.notifyListeners();
   }
 
-  public createRevisionChecksheetTemplate(templateId: string): ChecksheetTemplate | null {
+  public async createRevisionChecksheetTemplate(templateId: string, actorName = 'Admin'): Promise<ChecksheetTemplate | null> {
     const source = this.templates.find((t) => t.id === templateId);
     if (!source) return null;
 
@@ -721,12 +815,21 @@ class DataStore {
     };
 
     this.templates.push(newTemplate);
-    this.saveToStorage();
-    saveDocument('checksheetTemplates', newTemplate);
+    this.saveToStorageCache();
+
+    await saveDocument('checksheetTemplates', newTemplate);
+    await logAuditEvent({
+      action: 'REVISE_CHECKSHEET_TEMPLATE',
+      collectionName: 'checksheetTemplates',
+      documentId: newTemplate.id,
+      userName: actorName,
+      details: `Created revision ${newRev} for ${source.name}`,
+    });
+    this.notifyListeners();
     return newTemplate;
   }
 
-  public duplicateChecksheetTemplate(templateId: string): ChecksheetTemplate | null {
+  public async duplicateChecksheetTemplate(templateId: string, actorName = 'Admin'): Promise<ChecksheetTemplate | null> {
     const source = this.templates.find((t) => t.id === templateId);
     if (!source) return null;
 
@@ -742,48 +845,59 @@ class DataStore {
     };
 
     this.templates.push(newTemplate);
-    this.saveToStorage();
-    saveDocument('checksheetTemplates', newTemplate);
+    this.saveToStorageCache();
+
+    await saveDocument('checksheetTemplates', newTemplate);
+    this.notifyListeners();
     return newTemplate;
   }
 
-  public deleteChecksheetTemplate(templateId: string) {
+  public async deleteChecksheetTemplate(templateId: string, actorName = 'Admin'): Promise<void> {
+    const target = this.templates.find((t) => t.id === templateId);
     this.templates = this.templates.filter((t) => t.id !== templateId);
-    this.saveToStorage();
-    removeDocument('checksheetTemplates', templateId);
+    this.saveToStorageCache();
+
+    await removeDocument('checksheetTemplates', templateId);
+    if (target) {
+      await logAuditEvent({
+        action: 'DELETE_CHECKSHEET_TEMPLATE',
+        collectionName: 'checksheetTemplates',
+        documentId: templateId,
+        userName: actorName,
+        details: `Deleted template ${target.name}`,
+      });
+    }
+    this.notifyListeners();
   }
 
-  // Backward-compatible flat checksheet methods
-  public getChecksheetItems(
-    process?: TestProcess,
-    category?: ProductCategory
-  ): ChecksheetItem[] {
+  // Flat checksheets
+  public getChecksheetItems(process?: TestProcess, category?: ProductCategory): ChecksheetItem[] {
     let items = [...this.checksheets];
-    if (process) {
-      items = items.filter((i) => i.process === process);
-    }
+    if (process) items = items.filter((i) => i.process === process);
     if (category) {
       const catKey = category === 'Engine' ? 'Engine' : 'Power Train';
-      items = items.filter(
-        (i) => i.productCategory === 'Both' || i.productCategory === catKey
-      );
+      items = items.filter((i) => i.productCategory === 'Both' || i.productCategory === catKey);
     }
     return items.sort((a, b) => a.displayOrder - b.displayOrder);
   }
 
-  public saveChecksheetItem(item: ChecksheetItem) {
+  public async saveChecksheetItem(item: ChecksheetItem): Promise<void> {
     const idx = this.checksheets.findIndex((c) => c.id === item.id);
     if (idx >= 0) {
       this.checksheets[idx] = item;
     } else {
       this.checksheets.push(item);
     }
-    this.saveToStorage();
+    this.saveToStorageCache();
+    await saveDocument('checksheets', item);
+    this.notifyListeners();
   }
 
-  public deleteChecksheetItem(id: string) {
+  public async deleteChecksheetItem(id: string): Promise<void> {
     this.checksheets = this.checksheets.filter((c) => c.id !== id);
-    this.saveToStorage();
+    this.saveToStorageCache();
+    await removeDocument('checksheets', id);
+    this.notifyListeners();
   }
 
   // ==========================================
@@ -793,7 +907,7 @@ class DataStore {
     return this.gltRecords;
   }
 
-  public saveGLTRecord(record: GLTRecord): GLTRecord {
+  public async saveGLTRecord(record: GLTRecord): Promise<GLTRecord> {
     const existingForJO = this.gltRecords.filter(
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
@@ -807,8 +921,18 @@ class DataStore {
       }
       this.gltRecords.push(record);
     }
-    this.saveToStorage();
-    saveDocument('gltRecords', record);
+    this.saveToStorageCache();
+
+    await saveDocument('gltRecords', record);
+    await logAuditEvent({
+      action: 'SUBMIT_GLT_RECORD',
+      collectionName: 'gltRecords',
+      documentId: record.id,
+      userName: record.operatorName || 'GLT Operator',
+      details: `Submitted GLT for JO ${record.joNumber} with result ${record.result}`,
+      newValue: record,
+    });
+    this.notifyListeners();
     return record;
   }
 
@@ -819,7 +943,7 @@ class DataStore {
     return this.dynoRecords;
   }
 
-  public saveDynoRecord(record: DynotestRecord): DynotestRecord {
+  public async saveDynoRecord(record: DynotestRecord): Promise<DynotestRecord> {
     const existingForJO = this.dynoRecords.filter(
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
@@ -833,19 +957,31 @@ class DataStore {
       }
       this.dynoRecords.push(record);
     }
-    this.saveToStorage();
-    saveDocument('dynoRecords', record);
+    this.saveToStorageCache();
+
+    await saveDocument('dynoRecords', record);
+    await logAuditEvent({
+      action: 'SUBMIT_DYNO_RECORD',
+      collectionName: 'dynoRecords',
+      documentId: record.id,
+      userName: record.operatorName || 'Dyno Operator',
+      details: `Submitted Dynotest for JO ${record.joNumber} with result ${record.result}`,
+      newValue: record,
+    });
+
+    this.finishQueueRecord(record.joNumber);
+    this.notifyListeners();
     return record;
   }
 
   // ==========================================
-  // --- RECORDS: HYDRAULIC ---
+  // --- RECORDS: HYDRAULIC / TESTBENCH ---
   // ==========================================
   public getHydraulicRecords(): HydraulicRecord[] {
     return this.hydraulicRecords;
   }
 
-  public saveHydraulicRecord(record: HydraulicRecord): HydraulicRecord {
+  public async saveHydraulicRecord(record: HydraulicRecord): Promise<HydraulicRecord> {
     const existingForJO = this.hydraulicRecords.filter(
       (r) => r.joNumber.toUpperCase() === record.joNumber.toUpperCase()
     );
@@ -859,13 +995,25 @@ class DataStore {
       }
       this.hydraulicRecords.push(record);
     }
-    this.saveToStorage();
-    saveDocument('hydraulicRecords', record);
+    this.saveToStorageCache();
+
+    await saveDocument('hydraulicRecords', record);
+    await logAuditEvent({
+      action: 'SUBMIT_TESTBENCH_RECORD',
+      collectionName: 'hydraulicRecords',
+      documentId: record.id,
+      userName: record.operatorName || 'Testbench Operator',
+      details: `Submitted Hydraulic Testbench for JO ${record.joNumber} with result ${record.result}`,
+      newValue: record,
+    });
+
+    this.finishQueueRecord(record.joNumber);
+    this.notifyListeners();
     return record;
   }
 
   // ==========================================
-  // --- JO SEARCH & LOOKUP ---
+  // --- JO LOOKUP ---
   // ==========================================
   public lookupJOForStage(joNumber: string, targetStage: 'Dynotest' | 'Hydraulic Test') {
     const rawClean = joNumber.replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
@@ -875,12 +1023,9 @@ class DataStore {
       .filter((r) => matchJO(r.joNumber) && r.status === 'Submitted')
       .sort((a, b) => a.attemptNumber - b.attemptNumber);
 
-    if (glts.length === 0) {
-      return null;
-    }
+    if (glts.length === 0) return null;
 
     const latestGLT = glts[glts.length - 1];
-
     const isEngine =
       latestGLT.compGroup === 'Engine' ||
       latestGLT.productCategory === 'Engine' ||
@@ -917,7 +1062,7 @@ class DataStore {
   }
 
   // ==========================================
-  // --- COMBINED JO HISTORY LIST ---
+  // --- COMBINED HISTORY ---
   // ==========================================
   public getCombinedJOHistory(filters: FilterParams = {}): CombinedJORecords[] {
     const joMap = new Map<
@@ -957,16 +1102,12 @@ class DataStore {
 
     this.dynoRecords.forEach((d) => {
       const key = d.joNumber.toUpperCase();
-      if (joMap.has(key)) {
-        joMap.get(key)!.dynos.push(d);
-      }
+      if (joMap.has(key)) joMap.get(key)!.dynos.push(d);
     });
 
     this.hydraulicRecords.forEach((h) => {
       const key = h.joNumber.toUpperCase();
-      if (joMap.has(key)) {
-        joMap.get(key)!.hyds.push(h);
-      }
+      if (joMap.has(key)) joMap.get(key)!.hyds.push(h);
     });
 
     const result: CombinedJORecords[] = [];
@@ -1025,33 +1166,11 @@ class DataStore {
         latestRecordDate: latestDate,
       };
 
-      if (filters.joNumber && !entry.joNumber.toUpperCase().includes(filters.joNumber.toUpperCase())) {
-        return;
-      }
-      if (filters.compGroup && filters.compGroup !== 'All' && entry.compGroup !== filters.compGroup) {
-        return;
-      }
-      if (
-        filters.productCategory &&
-        filters.productCategory !== 'All' &&
-        entry.productCategory !== filters.productCategory
-      ) {
-        return;
-      }
-      if (
-        filters.productModel &&
-        filters.productModel !== 'All' &&
-        entry.productModel !== filters.productModel
-      ) {
-        return;
-      }
-      if (
-        filters.assemblyMechanic &&
-        filters.assemblyMechanic !== 'All' &&
-        entry.assemblyMechanic !== filters.assemblyMechanic
-      ) {
-        return;
-      }
+      if (filters.joNumber && !entry.joNumber.toUpperCase().includes(filters.joNumber.toUpperCase())) return;
+      if (filters.compGroup && filters.compGroup !== 'All' && entry.compGroup !== filters.compGroup) return;
+      if (filters.productCategory && filters.productCategory !== 'All' && entry.productCategory !== filters.productCategory) return;
+      if (filters.productModel && filters.productModel !== 'All' && entry.productModel !== filters.productModel) return;
+      if (filters.assemblyMechanic && filters.assemblyMechanic !== 'All' && entry.assemblyMechanic !== filters.assemblyMechanic) return;
 
       if (filters.resultFilter && filters.resultFilter !== 'All') {
         if (filters.resultFilter === 'GOOD' && latestStageResult !== 'GOOD') return;
@@ -1065,9 +1184,6 @@ class DataStore {
     return result.sort((a, b) => b.joNumber.localeCompare(a.joNumber));
   }
 
-  // ==========================================
-  // --- DASHBOARD CALCULATIONS (Unified Analytics Service) ---
-  // ==========================================
   public getDashboardStats(filters: FilterParams = {}): DashboardStats {
     const combined = this.getCombinedJOHistory();
     const analytics = computeUnifiedAnalytics(combined, filters);
@@ -1075,7 +1191,7 @@ class DataStore {
   }
 
   // ==========================================
-  // --- PRIORITY QUEUE SYSTEM ---
+  // --- PRIORITY QUEUE ---
   // ==========================================
   public getQueueRecords(compGroup?: CompGroup): QueueRecord[] {
     let list = [...this.queueRecords];
@@ -1083,19 +1199,29 @@ class DataStore {
       list = list.filter((q) => q.compGroup === compGroup);
     }
     return list.sort((a, b) => {
-      // Urgent unassigned always shown at top or separated
       if (a.isUrgentUnassigned && !b.isUrgentUnassigned) return -1;
       if (!a.isUrgentUnassigned && b.isUrgentUnassigned) return 1;
       return (a.currentPriority || 999) - (b.currentPriority || 999);
     });
   }
 
-  public addQueueRecord(record: QueueRecord) {
+  public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
     this.queueRecords.push(record);
-    this.saveToStorage();
+    this.saveToStorageCache();
+
+    await saveDocument('priorityQueue', record);
+    await logAuditEvent({
+      action: 'ADD_QUEUE_RECORD',
+      collectionName: 'priorityQueue',
+      documentId: record.queueRecordId,
+      userName: actorName,
+      details: `Added JO ${record.joRoNumber} to Priority Queue (${record.compGroup})`,
+      newValue: record,
+    });
+    this.notifyListeners();
   }
 
-  public updateQueueRecord(queueRecordId: string, updates: Partial<QueueRecord>) {
+  public async updateQueueRecord(queueRecordId: string, updates: Partial<QueueRecord>): Promise<void> {
     const idx = this.queueRecords.findIndex((q) => q.queueRecordId === queueRecordId);
     if (idx >= 0) {
       this.queueRecords[idx] = {
@@ -1103,38 +1229,37 @@ class DataStore {
         ...updates,
         updatedAt: new Date().toISOString(),
       };
-      this.saveToStorage();
+      this.saveToStorageCache();
+
+      await saveDocument('priorityQueue', this.queueRecords[idx]);
+      this.notifyListeners();
     }
   }
 
-  // Reorder queue with permission check, priority lock check, auto-renumbering, and history audit
-  public reorderQueue(
+  public async reorderQueue(
     compGroup: CompGroup,
     queueRecordId: string,
     newPriority: number,
     changedBy: string,
     remark: string
-  ): boolean {
+  ): Promise<boolean> {
     const target = this.queueRecords.find((q) => q.queueRecordId === queueRecordId);
     if (!target) return false;
-    if (target.priorityLocked || target.status === 'ON_PROCESS') return false; // Cannot reorder ON_PROCESS job
+    if (target.priorityLocked || target.status === 'ON_PROCESS') return false;
 
     const oldPriority = target.currentPriority;
 
-    // Get active waiting items in this compGroup
     const groupItems = this.queueRecords
       .filter((q) => q.compGroup === compGroup && !q.isUrgentUnassigned && q.status === 'WAITING' && q.queueRecordId !== queueRecordId)
       .sort((a, b) => a.currentPriority - b.currentPriority);
 
-    // Insert target at target position
     const clampedPos = Math.max(0, Math.min(newPriority - 1, groupItems.length));
     groupItems.splice(clampedPos, 0, target);
 
-    // Renumber priorities 1..N
     groupItems.forEach((item, index) => {
-      const p = index + 1;
-      item.currentPriority = p;
+      item.currentPriority = index + 1;
       item.updatedAt = new Date().toISOString();
+      saveDocument('priorityQueue', item);
     });
 
     target.history.push({
@@ -1145,17 +1270,26 @@ class DataStore {
       changedAt: new Date().toISOString(),
     });
 
-    this.saveToStorage();
+    this.saveToStorageCache();
+    await saveDocument('priorityQueue', target);
+    await logAuditEvent({
+      action: 'REORDER_QUEUE',
+      collectionName: 'priorityQueue',
+      documentId: target.queueRecordId,
+      userName: changedBy,
+      details: `Reordered JO ${target.joRoNumber} from priority ${oldPriority} to ${target.currentPriority}`,
+    });
+
+    this.notifyListeners();
     return true;
   }
 
-  // Assign urgent job to normal queue
-  public assignUrgentPriority(
+  public async assignUrgentPriority(
     queueRecordId: string,
     priority: number,
     changedBy: string,
     remark: string
-  ): boolean {
+  ): Promise<boolean> {
     const target = this.queueRecords.find((q) => q.queueRecordId === queueRecordId);
     if (!target) return false;
 
@@ -1172,14 +1306,11 @@ class DataStore {
       changedAt: new Date().toISOString(),
     });
 
-    // Re-index remaining group items
-    this.reorderQueue(target.compGroup, queueRecordId, priority, changedBy, remark);
-    this.saveToStorage();
+    await this.reorderQueue(target.compGroup, queueRecordId, priority, changedBy, remark);
     return true;
   }
 
-  // When test starts (GLT, Dyno, or Testbench): lock priority & set ON_PROCESS
-  public lockQueueOnTestStart(joNumber: string, compGroup?: CompGroup) {
+  public async lockQueueOnTestStart(joNumber: string, compGroup?: CompGroup): Promise<void> {
     const target = this.queueRecords.find(
       (q) => q.joRoNumber.toUpperCase() === joNumber.toUpperCase() && (!compGroup || q.compGroup === compGroup)
     );
@@ -1187,22 +1318,24 @@ class DataStore {
       target.status = 'ON_PROCESS';
       target.priorityLocked = true;
       target.updatedAt = new Date().toISOString();
-      this.saveToStorage();
+      this.saveToStorageCache();
+      await saveDocument('priorityQueue', target);
+      this.notifyListeners();
     }
   }
 
-  // When test is completed: set FINISH
-  public finishQueueRecord(joNumber: string) {
+  public async finishQueueRecord(joNumber: string): Promise<void> {
     const target = this.queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.toUpperCase());
     if (target) {
       target.status = 'FINISH';
       target.updatedAt = new Date().toISOString();
-      this.saveToStorage();
+      this.saveToStorageCache();
+      await saveDocument('priorityQueue', target);
+      this.notifyListeners();
     }
   }
 
-  // Apply AI Recommendation
-  public applyAIRecommendation(queueRecordId: string, changedBy: string): boolean {
+  public async applyAIRecommendation(queueRecordId: string, changedBy: string): Promise<boolean> {
     const target = this.queueRecords.find((q) => q.queueRecordId === queueRecordId);
     if (!target || !target.aiRecommendation) return false;
 
@@ -1217,7 +1350,7 @@ class DataStore {
   }
 
   // ==========================================
-  // --- PDF TEST REPORT & CERTIFICATE STORE ---
+  // --- REPORTS & CERTIFICATES ---
   // ==========================================
   public getPDFReportsForJO(joNumber: string): PDFTestReportRecord[] {
     return this.pdfReports
@@ -1225,9 +1358,18 @@ class DataStore {
       .sort((a, b) => b.version - a.version);
   }
 
-  public savePDFTestReportRecord(record: PDFTestReportRecord) {
+  public async savePDFTestReportRecord(record: PDFTestReportRecord): Promise<void> {
     this.pdfReports.push(record);
-    this.saveToStorage();
+    this.saveToStorageCache();
+    await saveDocument('pdfReports', record);
+    await logAuditEvent({
+      action: 'GENERATE_PDF_REPORT',
+      collectionName: 'pdfReports',
+      documentId: record.reportId,
+      userName: record.generatedBy || 'QC',
+      details: `Generated PDF report v${record.version} for JO ${record.joNumber}`,
+    });
+    this.notifyListeners();
   }
 
   public getCertificatesForJO(joNumber: string): QualityCertificateRecord[] {
@@ -1236,9 +1378,18 @@ class DataStore {
       .sort((a, b) => b.version - a.version);
   }
 
-  public saveQualityCertificateRecord(record: QualityCertificateRecord) {
+  public async saveQualityCertificateRecord(record: QualityCertificateRecord): Promise<void> {
     this.certificates.push(record);
-    this.saveToStorage();
+    this.saveToStorageCache();
+    await saveDocument('certificates', record);
+    await logAuditEvent({
+      action: 'GENERATE_CERTIFICATE',
+      collectionName: 'certificates',
+      documentId: record.certificateId,
+      userName: record.issuedBy || record.generatedBy || 'QC',
+      details: `Issued Quality Certificate ${record.certificateNumber || record.certNumber || record.certificateId} for JO ${record.joNumber}`,
+    });
+    this.notifyListeners();
   }
 }
 

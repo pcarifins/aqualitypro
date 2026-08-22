@@ -1,105 +1,184 @@
 {
-  "schema": {
-    "users": {
-      "description": "User accounts for Quality KRA app",
-      "fields": {
-        "id": "string",
-        "name": "string",
-        "username": "string",
-        "role": "string",
-        "jobGroup": "string",
-        "jobStatus": "string",
-        "active": "boolean"
-      }
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User accounts and permissions for AQuality PRO",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" },
+        "section": { "type": "string" },
+        "jobGroup": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "username", "role"]
     },
-    "productModels": {
-      "description": "Product models configuration",
-      "fields": {
-        "id": "string",
-        "code": "string",
-        "name": "string"
-      }
+    "Assembler": {
+      "title": "Assembler",
+      "description": "Assembly mechanic master data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nrp": { "type": "string" },
+        "name": { "type": "string" },
+        "section": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "name"]
     },
-    "checksheets": {
-      "description": "Inspection checksheets",
-      "fields": {
-        "id": "string",
-        "process": "string",
-        "category": "string",
-        "itemName": "string",
-        "active": "boolean"
-      }
+    "ProductModel": {
+      "title": "ProductModel",
+      "description": "Product models master list",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "compGroup": { "type": "string" },
+        "unitModel": { "type": "string" },
+        "component": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "unitModel", "component"]
     },
-    "gltRecords": {
+    "ChecksheetTemplate": {
+      "title": "ChecksheetTemplate",
+      "description": "Checksheet templates for testing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "compGroup": { "type": "string" },
+        "unitModel": { "type": "string" },
+        "component": { "type": "string" },
+        "testStage": { "type": "string" },
+        "revision": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "compGroup", "status"]
+    },
+    "ChecksheetItem": {
+      "title": "ChecksheetItem",
+      "description": "Flat checksheet items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "itemName": { "type": "string" },
+        "process": { "type": "string" },
+        "productCategory": { "type": "string" }
+      },
+      "required": ["id", "itemName"]
+    },
+    "QueueRecord": {
+      "title": "QueueRecord",
+      "description": "Priority queue records",
+      "type": "object",
+      "properties": {
+        "queueRecordId": { "type": "string" },
+        "joRoNumber": { "type": "string" },
+        "compGroup": { "type": "string" },
+        "unitModel": { "type": "string" },
+        "component": { "type": "string" },
+        "status": { "type": "string" },
+        "testType": { "type": "string" }
+      },
+      "required": ["queueRecordId", "joRoNumber"]
+    },
+    "GLTRecord": {
+      "title": "GLTRecord",
       "description": "GLT Inspection Records",
-      "fields": {
-        "id": "string",
-        "joNumber": "string",
-        "status": "string",
-        "timestamp": "string"
-      }
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "joNumber": { "type": "string" },
+        "result": { "type": "string" },
+        "status": { "type": "string" },
+        "operatorName": { "type": "string" }
+      },
+      "required": ["id", "joNumber", "result"]
     },
-    "dynoRecords": {
+    "DynoRecord": {
+      "title": "DynoRecord",
       "description": "Dynotest Records",
-      "fields": {
-        "id": "string",
-        "joNumber": "string",
-        "status": "string",
-        "timestamp": "string"
-      }
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "joNumber": { "type": "string" },
+        "result": { "type": "string" },
+        "status": { "type": "string" },
+        "operatorName": { "type": "string" }
+      },
+      "required": ["id", "joNumber", "result"]
     },
-    "hydraulicRecords": {
-      "description": "Hydraulic Testing Records",
-      "fields": {
-        "id": "string",
-        "joNumber": "string",
-        "status": "string",
-        "timestamp": "string"
-      }
+    "HydraulicRecord": {
+      "title": "HydraulicRecord",
+      "description": "Hydraulic / Testbench Records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "joNumber": { "type": "string" },
+        "result": { "type": "string" },
+        "status": { "type": "string" },
+        "operatorName": { "type": "string" }
+      },
+      "required": ["id", "joNumber", "result"]
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Quality Certificate Metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "certificateNo": { "type": "string" },
+        "joNumber": { "type": "string" }
+      },
+      "required": ["id", "certificateNo", "joNumber"]
+    },
+    "PDFReport": {
+      "title": "PDFReport",
+      "description": "Generated PDF Test Report Records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "joNumber": { "type": "string" }
+      },
+      "required": ["id", "joNumber"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Audit Trail Records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "timestamp"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "System and migration configuration",
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["completed"]
     }
   },
-  "rules": [
-    {
-      "collection": "users",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    },
-    {
-      "collection": "productModels",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    },
-    {
-      "collection": "checksheets",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    },
-    {
-      "collection": "gltRecords",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    },
-    {
-      "collection": "dynoRecords",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    },
-    {
-      "collection": "hydraulicRecords",
-      "allow": {
-        "read": "true",
-        "write": "true"
-      }
-    }
-  ]
+  "firestore": {
+    "users": { "schema": "User", "description": "Users collection" },
+    "assemblers": { "schema": "Assembler", "description": "Assemblers collection" },
+    "productModels": { "schema": "ProductModel", "description": "Product models collection" },
+    "checksheetTemplates": { "schema": "ChecksheetTemplate", "description": "Checksheet templates collection" },
+    "checksheets": { "schema": "ChecksheetItem", "description": "Flat checksheets collection" },
+    "priorityQueue": { "schema": "QueueRecord", "description": "Priority queue collection" },
+    "gltRecords": { "schema": "GLTRecord", "description": "GLT records collection" },
+    "dynoRecords": { "schema": "DynoRecord", "description": "Dynotest records collection" },
+    "hydraulicRecords": { "schema": "HydraulicRecord", "description": "Hydraulic testbench records collection" },
+    "certificates": { "schema": "Certificate", "description": "Quality certificates collection" },
+    "pdfReports": { "schema": "PDFReport", "description": "PDF test reports collection" },
+    "auditLogs": { "schema": "AuditLog", "description": "Audit log records collection" },
+    "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" }
+  }
 }

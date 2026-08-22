@@ -12,6 +12,7 @@ import {
   DashboardStats,
 } from './types';
 import { apiClient } from './api/client';
+import { store } from './data/storageEngine';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
@@ -107,6 +108,18 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
+
+    // Start realtime Firestore sync across all connected devices
+    store.initializeRealtimeSync();
+
+    // Subscribe to store updates for instant UI re-renders
+    const unsubscribeStore = store.subscribe(() => {
+      refreshData();
+    });
+
+    return () => {
+      unsubscribeStore();
+    };
   }, []);
 
   const handleLoginSuccess = (user: User) => {
@@ -426,6 +439,7 @@ export default function App() {
         {/* ADMINISTRATOR MASTER DATA & RBAC PANEL */}
         {(activeTab === 'admin' || isAdmin) && permissions.canManageMasterData && (
           <AdminPanel
+            currentUser={authenticatedUser}
             users={users}
             assemblers={assemblers}
             productModels={productModels}
