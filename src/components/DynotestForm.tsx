@@ -237,7 +237,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       return false;
     }
     if (!receivingTime) {
-      setValidationError('Please click "Receive at Dynotest" to record the receiving time before submitting.');
+      setValidationError('Receive at Dynotest');
       return false;
     }
 
@@ -631,6 +631,24 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
           <p className="text-xs text-amber-800 max-w-md mx-auto">
             No active Dynotest checksheet is configured for: <strong>{unitModel || 'Engine'} {component}</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
           </p>
+        </div>
+      ) : !receivingTime ? (
+        <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-7 text-center space-y-3">
+          <Clock className="w-8 h-8 text-blue-600 mx-auto" />
+
+          <h3 className="text-sm font-bold text-slate-800">
+            JO Selected — Waiting for Dynotest Receiving
+          </h3>
+
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Click "Receive at Dynotest" above to record
+            the actual Dynotest starting time and unlock
+            the inspection checklist.
+          </p>
+
+          <div className="text-[11px] font-bold text-blue-700">
+            Inspection Checklist Locked
+          </div>
         </div>
       ) : (
         <>

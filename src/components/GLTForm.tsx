@@ -28,7 +28,7 @@ import {
   ListOrdered,
   ShieldCheck,
 } from 'lucide-react';
-import { formatDateTime } from '../utils/formatters';
+import { formatDateTime,calculateMinutesBetween, } from '../utils/formatters';
 import { filterAssemblersByCompGroup } from '../utils/assemblerFilter';
 import { canUserAccessCompGroup } from '../utils/permissions';
 
@@ -75,8 +75,8 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
 
-  // Timestamps
-  const [incomingTime, setIncomingTime] = useState(new Date().toISOString());
+  // GLT receiving / lead-time start
+  const [receivingTime, setReceivingTime] = useState<string>('');
 
   // Checksheet State
   const [checksheetItems, setChecksheetItems] = useState<ChecksheetItem[]>([]);
@@ -138,6 +138,13 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     const record = queueRecords.find((q) => q.queueRecordId === qId);
     if (!record) return;
 
+    setAnswers({});
+    setItemRemarks({});
+    setNgItem('');
+    setNgDescription('');
+    setRemarks('');
+    setPhotoUrl('');
+
     setJoNumber(record.joRoNumber);
     setCompGroup(record.compGroup);
     setSubGroup(record.subGroup || null);
@@ -151,6 +158,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     setCustomer(record.customer || '');
     setPartNumber(record.partNumber || '');
     setSerialNumber(record.serialNumber || '');
+    setReceivingTime(record.gltReceivingTime || '');
 
     if (record.assemblyMechanic) {
       setAssemblyMechanic(record.assemblyMechanic);
@@ -167,6 +175,67 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     } else {
       setJoNumber(clean);
       setIsLockedFromQueue(false);
+    }
+  };
+
+  const handleReceiveAtGLT = async () => {
+    try {
+      if (!joNumber.trim()) {
+        setValidationError(
+          'Please select an authorized JO before receiving at GLT.'
+        );
+        return;
+      }
+
+      const targetQ =
+        selectedQueueId ||
+        queueRecords.find(
+          (q) =>
+            q.joRoNumber.toUpperCase() ===
+            joNumber.trim().toUpperCase()
+        )?.queueRecordId;
+
+      if (!targetQ) {
+        setValidationError(
+          'Queue record not found. Cannot start GLT lead-time.'
+        );
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+
+      // FIRESTORE FIRST
+      await store.updateQueueRecord(targetQ, {
+        gltReceivingTime: nowIso,
+        status: 'ON_PROCESS',
+        priorityLocked: true,
+      });
+
+      // Local UI only after Firestore succeeds
+      setReceivingTime(nowIso);
+
+      setValidationError(null);
+
+      setToastMessage(
+        'Received at GLT! GLT lead-time timer started.'
+      );
+
+      setTimeout(
+        () => setToastMessage(null),
+        3000
+      );
+    } catch (error: any) {
+      console.error(
+        'Failed to receive at GLT:',
+        error
+      );
+
+      setValidationError(
+        `Failed to start GLT: ${
+          error?.message ||
+          'Firestore update failed'
+        }`
+      );
     }
   };
 
@@ -232,6 +301,12 @@ export const GLTForm: React.FC<GLTFormProps> = ({
 
     if (!joNumber.trim()) {
       setValidationError('Please select or enter a valid JO Number.');
+      return false;
+    }
+    if (!receivingTime) {
+      setValidationError(
+        'Please click "Receive at GLT" before starting or submitting the inspection.'
+      );
       return false;
     }
     if (!assemblyMechanic.trim()) {
@@ -330,7 +405,12 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       setValidationError('Please select or enter a JO Number to save a draft.');
       return;
     }
-
+    if (!receivingTime) {
+      setValidationError(
+        'Receive at GLT first before saving inspection progress.'
+      );
+      return;
+    }
     const answerSnapshots = buildAnswerSnapshots();
     const draftRecord: GLTRecord = {
       id: `glt-draft-${Date.now()}`,
@@ -355,7 +435,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       remarks,
       operatorName: currentUser.name,
       operatorId: currentUser.id,
-      incomingTime,
+      incomingTime:receivingTime,
       submissionTime: new Date().toISOString(),
     };
 
@@ -374,6 +454,8 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     try {
       const answerSnapshots = buildAnswerSnapshots();
       const submissionTime = new Date().toISOString();
+
+      const finalGltLeadTimeMinutes = calculateMinutesBetween(receivingTime, submissionTime);
 
       const recordToSave: GLTRecord = {
         id: `glt-${Date.now()}`,
@@ -398,8 +480,9 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         remarks,
         operatorName: currentUser.name,
         operatorId: currentUser.id,
-        incomingTime,
+        incomingTime:receivingTime,
         submissionTime,
+        gltDurationMinutes:finalGltLeadTimeMinutes,
       };
 
       await onSaveRecord(recordToSave);
@@ -599,7 +682,47 @@ export const GLTForm: React.FC<GLTFormProps> = ({
             )}
           </div>
         </div>
+        {/* Receive at GLT / Start Lead-Time */}
+        {joNumber.trim() && (
+          <div className="pt-3 border-t border-slate-100">
+            {!receivingTime ? (
+              <button
+                type="button"
+                onClick={handleReceiveAtGLT}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-md transition-all"
+              >
+                <Clock className="w-4 h-4" />
+
+                <span>
+                  Click to "Receive at GLT"
+                  (Start Lead-Time Timer)
+                </span>
+              </button>
+            ) : (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center space-x-2 text-blue-800 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600" />
+
+                  <span>
+                    Received at:{' '}
+                    <strong className="font-mono">
+                      {formatDateTime(
+                        receivingTime
+                      )}
+                    </strong>
+                  </span>
+                </div>
+
+                <span className="text-blue-700 font-bold">
+                  GLT TIMER RUNNING
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+
 
       {/* GATING: Check if JO is selected */}
       {!joNumber.trim() ? (
@@ -611,6 +734,24 @@ export const GLTForm: React.FC<GLTFormProps> = ({
           <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
             Please choose an authorized Job Order from the Priority Queue above to load the appropriate inspection checklist, parameters, and submission controls.
           </p>
+        </div>
+      ) : !receivingTime ? (
+        <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-7 text-center space-y-3">
+          <Clock className="w-8 h-8 text-blue-600 mx-auto" />
+
+          <h3 className="text-sm font-bold text-slate-800">
+            JO Selected — Waiting for GLT Receiving
+          </h3>
+
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Click "Receive at GLT" above to record
+            the actual GLT starting time and unlock
+            the inspection checklist.
+          </p>
+
+          <div className="text-[11px] font-bold text-blue-700">
+            Inspection Checklist Locked
+          </div>
         </div>
       ) : (
         <>

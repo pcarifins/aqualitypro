@@ -113,7 +113,7 @@ export const HydraulicTestForm: React.FC<HydraulicTestFormProps> = ({
       return false;
     }
     if (!receivingTime) {
-      setValidationError('Please click "Receive at Hydraulic Test" to record receiving time.');
+      setValidationError('Receive at Hydraulic Test');
       return false;
     }
 

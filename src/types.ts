@@ -180,6 +180,7 @@ export interface QueueRecord {
   isUrgentUnassigned?: boolean;
   status: 'WAITING' | 'ON_PROCESS' | 'FINISH';
   gltStatus?: 'GOOD' | 'NOT_GOOD' | 'PENDING';
+  gltReceivingTime?: string;
   priorityLocked: boolean; // true when test starts (ON_PROCESS)
   remark?: string;
   customer?: string;

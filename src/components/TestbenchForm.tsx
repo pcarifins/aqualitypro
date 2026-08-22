@@ -234,7 +234,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       return false;
     }
     if (!receivingTime) {
-      setValidationError('Please click "Receive at Testbench" to record the receiving time before submitting.');
+      setValidationError('Receive at Testbench');
       return false;
     }
 
@@ -641,7 +641,26 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
             No active Testbench checksheet is configured for: <strong>{compGroup} / {unitModel} {component}</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
           </p>
         </div>
+      ) : !receivingTime ? (
+        <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-7 text-center space-y-3">
+          <Clock className="w-8 h-8 text-blue-600 mx-auto" />
+
+          <h3 className="text-sm font-bold text-slate-800">
+            JO Selected — Waiting for Testbench Receiving
+          </h3>
+
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Click "Receive at Testbench" above to record
+            the actual Testbench starting time and unlock
+            the inspection checklist.
+          </p>
+
+          <div className="text-[11px] font-bold text-blue-700">
+            Inspection Checklist Locked
+          </div>
+        </div>
       ) : (
+
         <>
           {/* SECTION 2: DYNAMIC TESTBENCH CHECKSHEET */}
           <div className="space-y-3">
