@@ -17,10 +17,12 @@ export const db = (function () {
     if (firebaseConfig.firestoreDatabaseId) {
       return initializeFirestore(app, {
         localCache: memoryLocalCache(),
+        ignoreUndefinedProperties: true,
       }, firebaseConfig.firestoreDatabaseId);
     } else {
       return initializeFirestore(app, {
         localCache: memoryLocalCache(),
+        ignoreUndefinedProperties: true,
       });
     }
   } catch {

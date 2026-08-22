@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ListOrdered,
   AlertTriangle,
@@ -20,7 +20,7 @@ import {
   X,
   History,
 } from 'lucide-react';
-import { QueueRecord, CompGroup, UserRole } from '../types';
+import { QueueRecord, CompGroup, UserRole, ProductModel } from '../types';
 import { apiClient } from '../api/client';
 
 interface PriorityQueueProps {
@@ -38,9 +38,12 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 }) => {
   const [selectedCompGroup, setSelectedCompGroup] = useState<CompGroup>('Engine');
   const [queueList, setQueueList] = useState<QueueRecord[]>([]);
+  const [productModels, setProductModels] = useState<ProductModel[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmittingJO, setIsSubmittingJO] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -55,6 +58,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [newJoNumber, setNewJoNumber] = useState('');
   const [newUnitModel, setNewUnitModel] = useState('');
   const [newComponent, setNewComponent] = useState('');
+  const [selectedProductModelId, setSelectedProductModelId] = useState('');
   const [newSubGroup, setNewSubGroup] = useState<'PT' | 'PPM' | ''>('');
   const [newTestType, setNewTestType] = useState<'PROD' | 'RETEST'>('PROD');
   const [newPlannedPriority, setNewPlannedPriority] = useState<number>(1);
@@ -74,9 +78,51 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     setIsLoading(false);
   };
 
+  const loadProductModels = async () => {
+    const models = await apiClient.getProductModels(true);
+    setProductModels(models || []);
+  };
+
   useEffect(() => {
     loadQueue();
+    loadProductModels();
   }, []);
+
+  // Filter Product Models by selected Queue / CompGroup
+  const eligibleProductModels = useMemo(() => {
+    return productModels.filter((m) => {
+      if (m.active === false) return false;
+      if (m.compGroup === selectedCompGroup) return true;
+      if (selectedCompGroup === 'Engine' && (m.category === 'Engine' || m.modelName?.toLowerCase().includes('engine'))) return true;
+      if (
+        selectedCompGroup === 'PT-PPM' &&
+        (m.category === 'Power Train' || m.category === 'PPM' || m.category === 'PT-PPM' || m.category === 'Power Train Component')
+      )
+        return true;
+      if (selectedCompGroup === 'Cylinder' && m.category === 'Cylinder') return true;
+      return false;
+    });
+  }, [productModels, selectedCompGroup]);
+
+  // Unique Unit Models for dropdown
+  const availableUnitModels = useMemo(() => {
+    return Array.from(
+      new Set(eligibleProductModels.map((m) => m.unitModel.trim().toUpperCase()))
+    ).sort();
+  }, [eligibleProductModels]);
+
+  // Dependent Component options based on selected Unit Model
+  const availableComponents = useMemo(() => {
+    if (!newUnitModel) return [];
+    return Array.from(
+      new Set(
+        eligibleProductModels
+          .filter((m) => m.unitModel.trim().toUpperCase() === newUnitModel.trim().toUpperCase())
+          .map((m) => (m.component || m.compName || '').trim().toUpperCase())
+          .filter(Boolean)
+      )
+    ).sort();
+  }, [eligibleProductModels, newUnitModel]);
 
   // Filter queue by Comp Group & Search
   const filteredGroupQueue = queueList.filter((q) => {
@@ -173,18 +219,50 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
   const handleSaveNewJO = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newJoNumber.trim() || !newUnitModel.trim() || !newComponent.trim()) return;
+    setFormError(null);
 
-    const groupWaitingCount = queueList.filter(
-      (q) => q.compGroup === selectedCompGroup && !q.isUrgentUnassigned && q.status === 'WAITING'
-    ).length;
+    const cleanJo = newJoNumber.trim().toUpperCase();
+    if (!cleanJo) {
+      setFormError('Please enter a valid JO / RO Number.');
+      return;
+    }
+    if (!newUnitModel) {
+      setFormError('Please select a Unit Model from Product Master.');
+      return;
+    }
+    if (!newComponent) {
+      setFormError('Please select a Component from Product Master.');
+      return;
+    }
 
-    const assignedPriority = newIsUrgent ? 999 : newPlannedPriority || groupWaitingCount + 1;
+    // Check duplicate active JO (STEP 28)
+    const activeExists = queueList.some(
+      (q) => q.status !== 'FINISH' && q.joRoNumber.trim().toUpperCase() === cleanJo
+    );
+    if (activeExists) {
+      setFormError('JO / RO Number already exists in the active queue.');
+      return;
+    }
+
+    // Normal JO priority = highest active ranked priority + 1 (STEP 19)
+    const activeRankedInGroup = queueList.filter(
+      (q) =>
+        q.compGroup === selectedCompGroup &&
+        !q.isUrgentUnassigned &&
+        (q.status === 'WAITING' || q.status === 'ON_PROCESS')
+    );
+    const maxPrio = activeRankedInGroup.reduce(
+      (max, q) => Math.max(max, q.currentPriority || 0),
+      0
+    );
+    const nextPrio = maxPrio + 1;
+    const assignedPriority = newIsUrgent ? 999 : nextPrio;
 
     const newRecord: QueueRecord = {
-      queueRecordId: `qr-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      joRoNumber: newJoNumber.trim().toUpperCase(),
+      queueRecordId: `qr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      joRoNumber: cleanJo,
       compGroup: selectedCompGroup,
+      productModelId: selectedProductModelId || undefined,
       subGroup: selectedCompGroup === 'PT-PPM' ? newSubGroup || null : null,
       unitModel: newUnitModel.trim().toUpperCase(),
       component: newComponent.trim().toUpperCase(),
@@ -218,19 +296,28 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       };
     }
 
-    const { store } = await import('../data/storageEngine');
-    store.addQueueRecord(newRecord);
+    try {
+      setIsSubmittingJO(true);
+      const { store } = await import('../data/storageEngine');
+      await store.addQueueRecord(newRecord, currentUserName);
 
-    setShowAddModal(false);
-    setNewJoNumber('');
-    setNewUnitModel('');
-    setNewComponent('');
-    setNewCustomer('');
-    setNewPartNumber('');
-    setNewSerialNumber('');
-    setNewMechanic('');
-    setNewIsUrgent(false);
-    await loadQueue();
+      setShowAddModal(false);
+      setNewJoNumber('');
+      setNewUnitModel('');
+      setNewComponent('');
+      setSelectedProductModelId('');
+      setNewCustomer('');
+      setNewPartNumber('');
+      setNewSerialNumber('');
+      setNewMechanic('');
+      setNewIsUrgent(false);
+      setFormError(null);
+      await loadQueue();
+    } catch (err: any) {
+      setFormError(`Failed to save JO to Firestore: ${err?.message || 'Network error'}`);
+    } finally {
+      setIsSubmittingJO(false);
+    }
   };
 
   return (
@@ -802,6 +889,22 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
             </div>
 
             <form onSubmit={handleSaveNewJO} className="space-y-3">
+              {formError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {eligibleProductModels.length === 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-semibold flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>
+                    No eligible Product Model configured for <strong>{selectedCompGroup}</strong>. Please configure Product Master first.
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -812,7 +915,10 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                     required
                     placeholder="e.g. 24109901"
                     value={newJoNumber}
-                    onChange={(e) => setNewJoNumber(e.target.value)}
+                    onChange={(e) => {
+                      setNewJoNumber(e.target.value);
+                      setFormError(null);
+                    }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-mono uppercase font-bold"
                   />
                 </div>
@@ -837,28 +943,65 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
                     Unit Model *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
-                    placeholder="e.g. HD785-7, PC2000-8R"
+                    disabled={eligibleProductModels.length === 0}
                     value={newUnitModel}
-                    onChange={(e) => setNewUnitModel(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold"
-                  />
+                    onChange={(e) => {
+                      setNewUnitModel(e.target.value);
+                      setNewComponent('');
+                      setSelectedProductModelId('');
+                      setFormError(null);
+                    }}
+                    className={`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white ${
+                      eligibleProductModels.length === 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    <option value="">-- Select Unit Model --</option>
+                    {availableUnitModels.map((um) => (
+                      <option key={um} value={um}>
+                        {um}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
                     Component Name *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
-                    placeholder="e.g. ENGINE ASSY, MAIN PUMP"
+                    disabled={!newUnitModel || eligibleProductModels.length === 0}
                     value={newComponent}
-                    onChange={(e) => setNewComponent(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold"
-                  />
+                    onChange={(e) => {
+                      const comp = e.target.value;
+                      setNewComponent(comp);
+                      setFormError(null);
+                      const match = eligibleProductModels.find(
+                        (m) =>
+                          m.unitModel.trim().toUpperCase() === newUnitModel.trim().toUpperCase() &&
+                          (m.component || m.compName || '').trim().toUpperCase() === comp.trim().toUpperCase()
+                      );
+                      if (match) {
+                        setSelectedProductModelId(match.id);
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white ${
+                      !newUnitModel || eligibleProductModels.length === 0
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : ''
+                    }`}
+                  >
+                    <option value="">
+                      {!newUnitModel ? 'Select Unit Model First' : '-- Select Component --'}
+                    </option>
+                    {availableComponents.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -928,9 +1071,15 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs"
+                    disabled={eligibleProductModels.length === 0 || isSubmittingJO}
+                    className={`text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs flex items-center space-x-1 ${
+                      eligibleProductModels.length === 0 || isSubmittingJO
+                        ? 'bg-slate-300 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
                   >
-                    Save to Queue
+                    {isSubmittingJO && <RefreshCw className="w-3 h-3 animate-spin mr-1" />}
+                    <span>{isSubmittingJO ? 'Saving...' : 'Save to Queue'}</span>
                   </button>
                 </div>
               </div>

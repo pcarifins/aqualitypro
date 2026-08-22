@@ -1249,11 +1249,49 @@ class DataStore {
     });
   }
 
-  public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
-    this.queueRecords.push(record);
-    this.saveToStorageCache();
+  public async normalizeQueuePriorities(compGroup?: CompGroup): Promise<void> {
+    const groups: CompGroup[] = compGroup ? [compGroup] : ['Engine', 'PT-PPM', 'Cylinder'];
 
+    for (const grp of groups) {
+      const activeRanked = this.queueRecords
+        .filter(
+          (q) =>
+            q.compGroup === grp &&
+            !q.isUrgentUnassigned &&
+            (q.status === 'WAITING' || q.status === 'ON_PROCESS')
+        )
+        .sort((a, b) => (a.currentPriority || 999) - (b.currentPriority || 999));
+
+      for (let i = 0; i < activeRanked.length; i++) {
+        const item = activeRanked[i];
+        const newPrio = i + 1;
+        if (item.currentPriority !== newPrio || item.plannedPriority !== newPrio) {
+          item.currentPriority = newPrio;
+          item.plannedPriority = newPrio;
+          item.updatedAt = new Date().toISOString();
+          await saveDocument('priorityQueue', item);
+        }
+      }
+    }
+    this.saveToStorageCache();
+    this.notifyListeners();
+  }
+
+  public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
+    // FIRESTORE FIRST
     await saveDocument('priorityQueue', record);
+
+    const existingIdx = this.queueRecords.findIndex(
+      (q) => q.queueRecordId === record.queueRecordId
+    );
+    if (existingIdx >= 0) {
+      this.queueRecords[existingIdx] = record;
+    } else {
+      this.queueRecords.push(record);
+    }
+
+    await this.normalizeQueuePriorities(record.compGroup);
+
     await logAuditEvent({
       action: 'ADD_QUEUE_RECORD',
       collectionName: 'priorityQueue',
@@ -1262,15 +1300,18 @@ class DataStore {
       details: `Added JO ${record.joRoNumber} to Priority Queue (${record.compGroup})`,
       newValue: record,
     });
+
+    this.saveToStorageCache();
     this.notifyListeners();
   }
 
-  public async updateQueueRecord(queueRecordId: string, updates: Partial<QueueRecord>): Promise<void> {
+  public async updateQueueRecord(
+    queueRecordId: string,
+    updates: Partial<QueueRecord>
+  ): Promise<void> {
     const idx = this.queueRecords.findIndex((q) => q.queueRecordId === queueRecordId);
     if (idx < 0) {
-      throw new Error(
-        `Queue record not found: ${queueRecordId}`
-      );
+      throw new Error(`Queue record not found: ${queueRecordId}`);
     }
 
     const updatedRecord: QueueRecord = {
@@ -1280,10 +1321,7 @@ class DataStore {
     };
 
     // FIRESTORE FIRST
-    await saveDocument(
-      'priorityQueue',
-      updatedRecord
-    );
+    await saveDocument('priorityQueue', updatedRecord);
 
     // Then local cache
     this.queueRecords[idx] = updatedRecord;
@@ -1306,17 +1344,24 @@ class DataStore {
     const oldPriority = target.currentPriority;
 
     const groupItems = this.queueRecords
-      .filter((q) => q.compGroup === compGroup && !q.isUrgentUnassigned && q.status === 'WAITING' && q.queueRecordId !== queueRecordId)
+      .filter(
+        (q) =>
+          q.compGroup === compGroup &&
+          !q.isUrgentUnassigned &&
+          q.status === 'WAITING' &&
+          q.queueRecordId !== queueRecordId
+      )
       .sort((a, b) => a.currentPriority - b.currentPriority);
 
     const clampedPos = Math.max(0, Math.min(newPriority - 1, groupItems.length));
     groupItems.splice(clampedPos, 0, target);
 
-    groupItems.forEach((item, index) => {
+    for (let index = 0; index < groupItems.length; index++) {
+      const item = groupItems[index];
       item.currentPriority = index + 1;
       item.updatedAt = new Date().toISOString();
-      saveDocument('priorityQueue', item);
-    });
+      await saveDocument('priorityQueue', item);
+    }
 
     target.history.push({
       oldPriority,
@@ -1326,8 +1371,11 @@ class DataStore {
       changedAt: new Date().toISOString(),
     });
 
-    this.saveToStorageCache();
     await saveDocument('priorityQueue', target);
+    this.saveToStorageCache();
+
+    await this.normalizeQueuePriorities(compGroup);
+
     await logAuditEvent({
       action: 'REORDER_QUEUE',
       collectionName: 'priorityQueue',
@@ -1385,8 +1433,9 @@ class DataStore {
     if (target) {
       target.status = 'FINISH';
       target.updatedAt = new Date().toISOString();
-      this.saveToStorageCache();
       await saveDocument('priorityQueue', target);
+      this.saveToStorageCache();
+      await this.normalizeQueuePriorities(target.compGroup);
       this.notifyListeners();
     }
   }

@@ -21,6 +21,42 @@ import {
 import { INITIAL_REQUIRED_PRODUCT_MODELS } from '../data/productMasterSeed';
 import { initialQueueRecords } from '../data/initialQueueData';
 
+export function sanitizeFirestoreValue(value: any): any {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (typeof value === 'object') {
+    const cleaned: Record<string, any> = {};
+
+    Object.entries(value).forEach(([key, val]) => {
+      const cleanedValue = sanitizeFirestoreValue(val);
+
+      if (cleanedValue !== undefined) {
+        cleaned[key] = cleanedValue;
+      }
+    });
+
+    return cleaned;
+  }
+
+  return value;
+}
+
 export async function fetchCollection<T>(collectionName: string): Promise<T[]> {
   try {
     const querySnapshot = await getDocs(collection(db, collectionName));
@@ -44,7 +80,8 @@ export async function saveDocument<
       `Cannot save to ${collectionName}: Missing document id, queueRecordId, reportId, or certificateId`
     );
   }
-  await setDoc(doc(db, collectionName, docId), data, { merge: true });
+  const cleanData = sanitizeFirestoreValue(data);
+  await setDoc(doc(db, collectionName, docId), cleanData, { merge: true });
 }
 
 export async function removeDocument(
@@ -117,7 +154,7 @@ export async function logAuditEvent(event: {
 }): Promise<void> {
   try {
     const auditId = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const auditDoc = {
+    const auditDoc = sanitizeFirestoreValue({
       id: auditId,
       timestamp: new Date().toISOString(),
       userUid: event.userUid || 'anonymous',
@@ -129,7 +166,7 @@ export async function logAuditEvent(event: {
       details: event.details || '',
       previousValue: event.previousValue || null,
       newValue: event.newValue || null,
-    };
+    });
     await setDoc(doc(db, 'auditLogs', auditId), auditDoc);
   } catch (err) {
     console.error('Failed to write audit log to Firestore:', err);
