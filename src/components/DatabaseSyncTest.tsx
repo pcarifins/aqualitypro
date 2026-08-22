@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { testFirestoreConnection, saveDocument, subscribeToCollection } from '../lib/firestoreSync';
+import {
+  testFirestoreConnection,
+  saveDocument,
+  removeDocument,
+  subscribeToCollection,
+} from '../lib/firestoreSync';
 import {
   Database,
   CheckCircle2,
@@ -13,6 +18,9 @@ import {
   Globe,
   Radio,
   Send,
+  Trash2,
+  AlertCircle,
+  Clock,
 } from 'lucide-react';
 import { firebaseConfig } from '../lib/firebase';
 
@@ -33,6 +41,12 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
   const [isSendingSync, setIsSendingSync] = useState(false);
   const [lastLiveMessage, setLastLiveMessage] = useState<string | null>(null);
 
+  // Diagnostic State Metrics
+  const [lastSnapshotTime, setLastSnapshotTime] = useState<string | null>(null);
+  const [lastSuccessfulWrite, setLastSuccessfulWrite] = useState<string | null>(null);
+  const [pendingWrite, setPendingWrite] = useState<boolean>(false);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
+
   // Ping connection on load
   const handlePingTest = async () => {
     setIsTestingPing(true);
@@ -46,10 +60,16 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
 
     // Subscribe to test collection for cross-device real-time sync verification
     const unsub = subscribeToCollection<any>('_sync_test', (items) => {
+      const nowStr = new Date().toLocaleTimeString();
+      setLastSnapshotTime(nowStr);
+
       const found = items.find((i) => i.id === 'device_test');
       if (found) {
         setSyncTestDoc(found);
-        setLastLiveMessage(`Received real-time update at ${new Date().toLocaleTimeString()}: status='${found.status}'`);
+        setLastLiveMessage(`Snapshot received at ${nowStr}: code='${found.code}', status='${found.status}'`);
+      } else {
+        setSyncTestDoc(null);
+        setLastLiveMessage(`Snapshot received at ${nowStr}: No active UAT sync test record.`);
       }
     });
 
@@ -58,10 +78,12 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
 
   const handleInitiateSyncTest = async () => {
     setIsSendingSync(true);
+    setPendingWrite(true);
+    setLastSyncError(null);
     try {
       const testData = {
         id: 'device_test',
-        code: 'SYNC-TEST-001',
+        code: 'SYNC-UAT-001',
         initiatedBy: currentUser.name,
         userRole: currentUser.role,
         status: 'TEST_INITIATED',
@@ -69,29 +91,57 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
         deviceOrigin: navigator.userAgent.substring(0, 40),
       };
       await saveDocument('_sync_test', testData);
+      setLastSuccessfulWrite(new Date().toLocaleTimeString());
     } catch (err: any) {
-      alert(`Sync test failed: ${err.message}`);
+      const msg = err?.message || 'Sync write failed';
+      setLastSyncError(msg);
+      alert(`Sync test failed: ${msg}`);
     } finally {
       setIsSendingSync(false);
+      setPendingWrite(false);
     }
   };
 
   const handleSimulateDeviceBUpdate = async () => {
     setIsSendingSync(true);
+    setPendingWrite(true);
+    setLastSyncError(null);
     try {
       const testData = {
         id: 'device_test',
-        code: 'SYNC-TEST-001',
-        updatedBy: `${currentUser.name} (Device B)`,
-        status: 'UPDATED_FROM_DEVICE_B',
+        code: 'SYNC-UAT-001',
+        updatedBy: `${currentUser.name} (Terminal Device B)`,
+        status: 'UPDATED_DEVICE_B',
         timestamp: new Date().toISOString(),
-        deviceOrigin: 'Simulated Secondary Operational Terminal',
+        deviceOrigin: 'Secondary Operational Terminal (Device B)',
       };
       await saveDocument('_sync_test', testData);
+      setLastSuccessfulWrite(new Date().toLocaleTimeString());
     } catch (err: any) {
-      alert(`Device B simulation failed: ${err.message}`);
+      const msg = err?.message || 'Device B update failed';
+      setLastSyncError(msg);
+      alert(`Device B simulation failed: ${msg}`);
     } finally {
       setIsSendingSync(false);
+      setPendingWrite(false);
+    }
+  };
+
+  const handleDeleteSyncTestDoc = async () => {
+    setIsSendingSync(true);
+    setPendingWrite(true);
+    setLastSyncError(null);
+    try {
+      await removeDocument('_sync_test', 'device_test');
+      setSyncTestDoc(null);
+      setLastSuccessfulWrite(new Date().toLocaleTimeString());
+    } catch (err: any) {
+      const msg = err?.message || 'Deletion failed';
+      setLastSyncError(msg);
+      alert(`Delete UAT test record failed: ${msg}`);
+    } finally {
+      setIsSendingSync(false);
+      setPendingWrite(false);
     }
   };
 
@@ -108,7 +158,7 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
             Cloud Firestore Single Source of Truth Status
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Realtime synchronization testing across multiple browser sessions, terminals, and devices.
+            Realtime synchronization diagnostic panel across all operational terminals and browser sessions.
           </p>
         </div>
 
@@ -142,7 +192,7 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
             <span>Firestore Database ID</span>
           </div>
           <div className="text-xs font-mono font-bold text-slate-800 truncate" title={firebaseConfig.firestoreDatabaseId}>
-            {firebaseConfig.firestoreDatabaseId || 'ai-studio-remixtestingpro...'}
+            {firebaseConfig.firestoreDatabaseId || '(default)'}
           </div>
         </div>
 
@@ -185,6 +235,49 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
         </div>
       </div>
 
+      {/* Sync Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-0.5">
+          <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+            <Clock className="w-3 h-3 text-blue-500" />
+            <span>Last Snapshot</span>
+          </div>
+          <div className="text-xs font-mono font-bold text-slate-800">
+            {lastSnapshotTime || 'Waiting...'}
+          </div>
+        </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-0.5">
+          <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+            <span>Last Successful Write</span>
+          </div>
+          <div className="text-xs font-mono font-bold text-slate-800">
+            {lastSuccessfulWrite || 'None in current session'}
+          </div>
+        </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-0.5">
+          <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+            <Activity className="w-3 h-3 text-amber-500" />
+            <span>Pending Write Status</span>
+          </div>
+          <div className={`text-xs font-mono font-bold ${pendingWrite ? 'text-amber-600 animate-pulse' : 'text-slate-700'}`}>
+            {pendingWrite ? 'WRITE IN PROGRESS...' : 'IDLE (All writes confirmed)'}
+          </div>
+        </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-0.5">
+          <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+            <AlertCircle className="w-3 h-3 text-rose-500" />
+            <span>Last Sync Error</span>
+          </div>
+          <div className={`text-xs font-mono font-bold truncate ${lastSyncError ? 'text-rose-600' : 'text-emerald-600'}`}>
+            {lastSyncError || 'None (0 errors)'}
+          </div>
+        </div>
+      </div>
+
       {/* Realtime Listener Status */}
       <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 shadow-inner">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
@@ -212,10 +305,10 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Cross-Device Real-Time Sync Test Tool
+              Cross-Device Real-Time Sync Test Tool (UAT)
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Verify that document updates written on one terminal appear instantly without page refresh.
+              Verify that document updates written on one terminal appear instantly on all connected devices without page refresh.
             </p>
           </div>
         </div>
@@ -224,25 +317,34 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
           <button
             onClick={handleInitiateSyncTest}
             disabled={isSendingSync}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shadow-sm transition-all"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shadow-xs transition-all disabled:opacity-50"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>Initiate Sync Test (Write SYNC-TEST-001)</span>
+            <span>Initiate Sync Test (Write SYNC-UAT-001)</span>
           </button>
 
           <button
             onClick={handleSimulateDeviceBUpdate}
             disabled={isSendingSync || !syncTestDoc}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shadow-sm transition-all disabled:opacity-50"
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shadow-xs transition-all disabled:opacity-50"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Simulate Device B Update (UPDATED_FROM_DEVICE_B)</span>
+            <span>Simulate Device B Update (UPDATED_DEVICE_B)</span>
+          </button>
+
+          <button
+            onClick={handleDeleteSyncTestDoc}
+            disabled={isSendingSync || !syncTestDoc}
+            className="px-4 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-200 text-xs font-bold rounded-xl flex items-center space-x-2 transition-all disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Temporary UAT Record</span>
           </button>
         </div>
 
         {/* Live Test Document Display */}
-        {syncTestDoc && (
-          <div className="bg-white border border-blue-200 rounded-xl p-3.5 text-xs font-mono space-y-1.5 shadow-xs">
+        {syncTestDoc ? (
+          <div className="bg-white border border-blue-200 rounded-xl p-3.5 text-xs font-mono space-y-1.5 shadow-2xs">
             <div className="text-[10px] font-sans font-bold text-blue-700 uppercase">
               Current Live Document (_sync_test/device_test)
             </div>
@@ -254,15 +356,15 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
               <div>
                 <span className="text-slate-400">Status:</span>{' '}
                 <span className={`font-black px-1.5 py-0.5 rounded ${
-                  syncTestDoc.status === 'UPDATED_FROM_DEVICE_B'
-                    ? 'bg-purple-100 text-purple-800'
-                    : 'bg-blue-100 text-blue-800'
+                  syncTestDoc.status === 'UPDATED_DEVICE_B'
+                    ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                    : 'bg-blue-100 text-blue-800 border border-blue-200'
                 }`}>
                   {syncTestDoc.status}
                 </span>
               </div>
               <div>
-                <span className="text-slate-400">Updated By:</span>{' '}
+                <span className="text-slate-400">Updated / Initiated By:</span>{' '}
                 <span className="font-semibold">{syncTestDoc.updatedBy || syncTestDoc.initiatedBy || '-'}</span>
               </div>
               <div>
@@ -270,6 +372,10 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
                 <span className="text-slate-600">{syncTestDoc.timestamp}</span>
               </div>
             </div>
+          </div>
+        ) : (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center text-xs text-slate-500 font-mono">
+            No temporary UAT test record currently active. Click "Initiate Sync Test" to create SYNC-UAT-001.
           </div>
         )}
       </div>

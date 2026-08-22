@@ -69,8 +69,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="text-blue-600 font-black text-base sm:text-lg tracking-tight">
                   AQuality PRO
                 </span>
-                <span className="text-[10px] font-extrabold uppercase bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
-                  Trial Ready
+                <span className="text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
+                  System Online
                 </span>
               </div>
               <p className="text-[10px] sm:text-[11px] text-slate-500 hidden sm:block">

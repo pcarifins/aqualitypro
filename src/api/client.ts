@@ -24,100 +24,48 @@ import { store } from '../data/storageEngine';
 import { prioritySourceService } from '../services/prioritySourceService';
 import { pdfReportService } from '../services/pdfReportService';
 
-const API_BASE = '/api';
-
 export const apiClient = {
   // --- USERS ---
   getUsers: async (): Promise<User[]> => {
-    try {
-      const res = await fetch(`${API_BASE}/users`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getUsers();
   },
 
   saveUser: async (user: User): Promise<void> => {
-    store.saveUser(user);
-    try {
-      await fetch(`${API_BASE}/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(user),
-      });
-    } catch {}
+    return store.saveUser(user);
   },
 
   deleteUser: async (id: string): Promise<void> => {
-    store.deleteUser(id);
-    try {
-      await fetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
-    } catch {}
+    return store.deleteUser(id);
   },
 
   changePassword: async (userId: string, newPass: string): Promise<boolean> => {
-    const success = store.changeUserPassword(userId, newPass);
-    try {
-      await fetch(`${API_BASE}/users/${userId}/password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPass }),
-      });
-    } catch {}
-    return success;
+    return store.changeUserPassword(userId, newPass);
   },
 
   // --- ASSEMBLER MASTER ---
   getAssemblers: async (onlyActive = false): Promise<Assembler[]> => {
-    try {
-      const res = await fetch(`${API_BASE}/assemblers?active=${onlyActive}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getAssemblers(onlyActive);
   },
 
   saveAssembler: async (assembler: Assembler): Promise<void> => {
-    store.saveAssembler(assembler);
-    try {
-      await fetch(`${API_BASE}/assemblers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(assembler),
-      });
-    } catch {}
+    return store.saveAssembler(assembler);
   },
 
   deleteAssembler: async (id: string): Promise<void> => {
-    store.deleteAssembler(id);
-    try {
-      await fetch(`${API_BASE}/assemblers/${id}`, { method: 'DELETE' });
-    } catch {}
+    return store.deleteAssembler(id);
   },
 
   // --- PRODUCT MASTER ---
   getProductModels: async (onlyActive = false): Promise<ProductModel[]> => {
-    try {
-      const res = await fetch(`${API_BASE}/models?active=${onlyActive}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getProductModels(onlyActive);
   },
 
   saveProductModel: async (model: ProductModel): Promise<void> => {
-    store.saveProductModel(model);
-    try {
-      await fetch(`${API_BASE}/models`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(model),
-      });
-    } catch {}
+    return store.saveProductModel(model);
   },
 
   deleteProductModel: async (id: string): Promise<void> => {
-    store.deleteProductModel(id);
-    try {
-      await fetch(`${API_BASE}/models/${id}`, { method: 'DELETE' });
-    } catch {}
+    return store.deleteProductModel(id);
   },
 
   // --- CHECKSHEET TEMPLATES & MASTER ---
@@ -128,19 +76,10 @@ export const apiClient = {
     testStage?: TestProcess;
     status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
   }): Promise<ChecksheetTemplate[]> => {
-    try {
-      const params = new URLSearchParams(filter as any);
-      const res = await fetch(`${API_BASE}/checksheet-templates?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getChecksheetTemplates(filter);
   },
 
   getChecksheetTemplateById: async (id: string): Promise<ChecksheetTemplate | undefined> => {
-    try {
-      const res = await fetch(`${API_BASE}/checksheet-templates/${id}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getChecksheetTemplateById(id);
   },
 
@@ -150,16 +89,6 @@ export const apiClient = {
     component: string,
     testStage: TestProcess
   ): Promise<ChecksheetTemplate | null> => {
-    try {
-      const params = new URLSearchParams({
-        compGroup,
-        unitModel,
-        component,
-        testStage,
-      });
-      const res = await fetch(`${API_BASE}/checksheet-templates/active?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getActiveTemplate(compGroup, unitModel, component, testStage);
   },
 
@@ -168,87 +97,43 @@ export const apiClient = {
   },
 
   saveChecksheetTemplate: async (template: ChecksheetTemplate): Promise<void> => {
-    store.saveChecksheetTemplate(template);
-    try {
-      await fetch(`${API_BASE}/checksheet-templates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(template),
-      });
-    } catch {}
+    return store.saveChecksheetTemplate(template);
   },
 
   activateChecksheetTemplate: async (templateId: string): Promise<void> => {
-    store.activateChecksheetTemplate(templateId);
-    try {
-      await fetch(`${API_BASE}/checksheet-templates/${templateId}/activate`, {
-        method: 'POST',
-      });
-    } catch {}
+    return store.activateChecksheetTemplate(templateId);
   },
 
   createRevisionChecksheetTemplate: async (
     templateId: string
   ): Promise<ChecksheetTemplate | null> => {
-    const res = store.createRevisionChecksheetTemplate(templateId);
-    try {
-      await fetch(`${API_BASE}/checksheet-templates/${templateId}/revision`, {
-        method: 'POST',
-      });
-    } catch {}
-    return res;
+    return store.createRevisionChecksheetTemplate(templateId);
   },
 
   duplicateChecksheetTemplate: async (
     templateId: string
   ): Promise<ChecksheetTemplate | null> => {
-    const res = store.duplicateChecksheetTemplate(templateId);
-    try {
-      await fetch(`${API_BASE}/checksheet-templates/${templateId}/duplicate`, {
-        method: 'POST',
-      });
-    } catch {}
-    return res;
+    return store.duplicateChecksheetTemplate(templateId);
   },
 
   deleteChecksheetTemplate: async (id: string): Promise<void> => {
-    store.deleteChecksheetTemplate(id);
-    try {
-      await fetch(`${API_BASE}/checksheet-templates/${id}`, { method: 'DELETE' });
-    } catch {}
+    return store.deleteChecksheetTemplate(id);
   },
 
-  // Legacy flat checksheets (fallback)
+  // Legacy flat checksheets
   getChecksheetItems: async (
     process?: TestProcess,
     category?: ProductCategory
   ): Promise<ChecksheetItem[]> => {
-    try {
-      const params = new URLSearchParams();
-      if (process) params.set('process', process);
-      if (category) params.set('category', category);
-      const res = await fetch(`${API_BASE}/checksheets?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getChecksheetItems(process, category);
   },
 
   saveChecksheetItem: async (item: ChecksheetItem): Promise<void> => {
-    store.saveChecksheetItem(item);
-    try {
-      await fetch(`${API_BASE}/checksheets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      });
-    } catch {}
+    return store.saveChecksheetItem(item);
   },
 
   deleteChecksheetItem: async (id: string): Promise<void> => {
-    store.deleteChecksheetItem(id);
-    try {
-      await fetch(`${API_BASE}/checksheets/${id}`, { method: 'DELETE' });
-    } catch {}
+    return store.deleteChecksheetItem(id);
   },
 
   // --- JO LOOKUP ---
@@ -256,71 +141,30 @@ export const apiClient = {
     joNumber: string,
     stage: 'Dynotest' | 'Hydraulic Test'
   ): Promise<any> => {
-    try {
-      const res = await fetch(
-        `${API_BASE}/jo/lookup?joNumber=${encodeURIComponent(
-          joNumber
-        )}&stage=${encodeURIComponent(stage)}`
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        return { error: data.error || 'Failed to lookup JO' };
-      }
-      return data;
-    } catch {}
     return store.lookupJOForStage(joNumber, stage);
   },
 
   // --- GLT ---
   saveGLTRecord: async (record: GLTRecord): Promise<GLTRecord> => {
-    const saved = store.saveGLTRecord(record);
-    try {
-      await fetch(`${API_BASE}/records/glt`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(record),
-      });
-    } catch {}
-    return saved;
+    return store.saveGLTRecord(record);
   },
 
   // --- DYNO ---
   saveDynoRecord: async (record: DynotestRecord): Promise<DynotestRecord> => {
-    const saved = store.saveDynoRecord(record);
-    try {
-      await fetch(`${API_BASE}/records/dyno`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(record),
-      });
-    } catch {}
-    return saved;
+    return store.saveDynoRecord(record);
   },
 
   // --- HYDRAULIC ---
   saveHydraulicRecord: async (
     record: HydraulicRecord
   ): Promise<HydraulicRecord> => {
-    const saved = store.saveHydraulicRecord(record);
-    try {
-      await fetch(`${API_BASE}/records/hydraulic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(record),
-      });
-    } catch {}
-    return saved;
+    return store.saveHydraulicRecord(record);
   },
 
   // --- HISTORY ---
   getCombinedJOHistory: async (
     filters: FilterParams = {}
   ): Promise<CombinedJORecords[]> => {
-    try {
-      const params = new URLSearchParams(filters as any);
-      const res = await fetch(`${API_BASE}/records/history?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getCombinedJOHistory(filters);
   },
 
@@ -328,20 +172,11 @@ export const apiClient = {
   getDashboardStats: async (
     filters: FilterParams = {}
   ): Promise<DashboardStats> => {
-    try {
-      const params = new URLSearchParams(filters as any);
-      const res = await fetch(`${API_BASE}/dashboard/stats?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getDashboardStats(filters);
   },
 
   // --- PRIORITY QUEUE ---
   getQueueRecords: async (compGroup?: CompGroup): Promise<QueueRecord[]> => {
-    try {
-      const res = await fetch(`${API_BASE}/queue${compGroup ? `?compGroup=${compGroup}` : ''}`);
-      if (res.ok) return await res.json();
-    } catch {}
     return store.getQueueRecords(compGroup);
   },
 
@@ -352,15 +187,7 @@ export const apiClient = {
     changedBy: string,
     remark: string
   ): Promise<boolean> => {
-    const success = store.reorderQueue(compGroup, queueRecordId, newPriority, changedBy, remark);
-    try {
-      await fetch(`${API_BASE}/queue/reorder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ compGroup, queueRecordId, newPriority, changedBy, remark }),
-      });
-    } catch {}
-    return success;
+    return store.reorderQueue(compGroup, queueRecordId, newPriority, changedBy, remark);
   },
 
   assignUrgentPriority: async (
@@ -369,27 +196,11 @@ export const apiClient = {
     changedBy: string,
     remark: string
   ): Promise<boolean> => {
-    const success = store.assignUrgentPriority(queueRecordId, priority, changedBy, remark);
-    try {
-      await fetch(`${API_BASE}/queue/assign-urgent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queueRecordId, priority, changedBy, remark }),
-      });
-    } catch {}
-    return success;
+    return store.assignUrgentPriority(queueRecordId, priority, changedBy, remark);
   },
 
   applyAIRecommendation: async (queueRecordId: string, changedBy: string): Promise<boolean> => {
-    const success = store.applyAIRecommendation(queueRecordId, changedBy);
-    try {
-      await fetch(`${API_BASE}/queue/apply-ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queueRecordId, changedBy }),
-      });
-    } catch {}
-    return success;
+    return store.applyAIRecommendation(queueRecordId, changedBy);
   },
 
   syncPPCDataSource: async (currentUser: string): Promise<{ added: number; updated: number }> => {
@@ -431,9 +242,6 @@ export const apiClient = {
 
   // --- RESET DATA ---
   resetSeedData: async (): Promise<void> => {
-    store.resetToDefault();
-    try {
-      await fetch(`${API_BASE}/seed/reset`, { method: 'POST' });
-    } catch {}
+    return store.resetToDefault();
   },
 };

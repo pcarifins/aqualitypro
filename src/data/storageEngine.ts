@@ -115,7 +115,7 @@ class DataStore {
 
     // 2. Set up realtime listeners for all collections
     const unSubUsers = subscribeToCollection<User>('users', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.users = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -123,7 +123,7 @@ class DataStore {
     });
 
     const unSubAssemblers = subscribeToCollection<Assembler>('assemblers', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.assemblers = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -131,7 +131,7 @@ class DataStore {
     });
 
     const unSubModels = subscribeToCollection<ProductModel>('productModels', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.models = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -139,7 +139,7 @@ class DataStore {
     });
 
     const unSubTemplates = subscribeToCollection<ChecksheetTemplate>('checksheetTemplates', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.templates = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -147,7 +147,7 @@ class DataStore {
     });
 
     const unSubChecksheets = subscribeToCollection<ChecksheetItem>('checksheets', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.checksheets = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -155,7 +155,7 @@ class DataStore {
     });
 
     const unSubQueue = subscribeToCollection<QueueRecord>('priorityQueue', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         // preserve field fallback
         this.queueRecords = data.map((q) => ({
           ...q,
@@ -167,7 +167,7 @@ class DataStore {
     });
 
     const unSubGLT = subscribeToCollection<GLTRecord>('gltRecords', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.gltRecords = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -175,7 +175,7 @@ class DataStore {
     });
 
     const unSubDyno = subscribeToCollection<DynotestRecord>('dynoRecords', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.dynoRecords = data;
         this.saveToStorageCache();
         this.notifyListeners();
@@ -183,7 +183,7 @@ class DataStore {
     });
 
     const unSubHydraulic = subscribeToCollection<HydraulicRecord>('hydraulicRecords', (data) => {
-      if (data && data.length > 0) {
+      if (data) {
         this.hydraulicRecords = data;
         this.saveToStorageCache();
         this.notifyListeners();

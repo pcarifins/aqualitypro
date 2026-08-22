@@ -70,7 +70,7 @@ export function canUserAccessCompGroup(user?: User | null, compGroup?: string): 
       if (gUpper === 'ENGINE' && targetComp === 'ENGINE') return true;
       if (
         (gUpper === 'PT-PPM' || gUpper === 'POWER TRAIN' || gUpper === 'PPM') &&
-        (targetComp === 'PT-PPM' || targetComp === 'POWER TRAIN' || targetComp === 'CYLINDER' || targetComp === 'PPM')
+        (targetComp === 'PT-PPM' || targetComp === 'POWER TRAIN' || targetComp === 'PPM')
       ) {
         return true;
       }
