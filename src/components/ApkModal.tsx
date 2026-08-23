@@ -117,8 +117,8 @@ export const ApkModal: React.FC<ApkModalProps> = ({ onClose }) => {
                   type="button"
                   onClick={() => {
                     const manifestStr = JSON.stringify({
-                      short_name: "Testing PRO",
-                      name: "Testing PRO - Industrial Quality Checksheet & Lead-Time System",
+                      short_name: "AQuality PRO",
+                      name: "AQuality PRO - Industrial Quality Testing System",
                       description: "Android-first quality control system for GLT, Engine Dynotest, and Power Train Hydraulic Test recording.",
                       id: "/",
                       start_url: appUrl,
@@ -128,8 +128,10 @@ export const ApkModal: React.FC<ApkModalProps> = ({ onClose }) => {
                       background_color: "#0f172a",
                       theme_color: "#2563eb",
                       icons: [
-                        { src: `${appUrl}/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any maskable" },
-                        { src: `${appUrl}/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any maskable" }
+                        { src: `${appUrl}/aquality-icon-192.png?v=4`, sizes: "192x192", type: "image/png", purpose: "any" },
+                        { src: `${appUrl}/aquality-icon-512.png?v=4`, sizes: "512x512", type: "image/png", purpose: "any" },
+                        { src: `${appUrl}/aquality-maskable-192.png?v=4`, sizes: "192x192", type: "image/png", purpose: "maskable" },
+                        { src: `${appUrl}/aquality-maskable-512.png?v=4`, sizes: "512x512", type: "image/png", purpose: "maskable" }
                       ]
                     }, null, 2);
                     navigator.clipboard.writeText(manifestStr);

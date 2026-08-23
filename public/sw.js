@@ -1,4 +1,4 @@
-const CACHE_NAME = 'testing-pro-v3';
+const CACHE_NAME = 'aquality-pro-v4';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
