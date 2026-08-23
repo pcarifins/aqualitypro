@@ -217,6 +217,7 @@ export interface QueueRecord {
   receivingTime?: string; // Standard receiving ISO timestamp for active testing process
   priorityLocked: boolean; // true when test starts (ON_PROCESS)
   testingLineId?: string; // Configured Testing Line assignment
+  currentTestingLineId?: string; // Canonical testing line assignment
   remark?: string;
   customer?: string;
   partNumber?: string;

@@ -42,20 +42,21 @@ export function getEstimatedDurationHours(
   overrides: TestOverride[] = []
 ): number {
   // Check if there is an active override for this JO/RO on the assigned line
+  const activeLineId = item.currentTestingLineId || item.testingLineId;
   if (overrides && overrides.length > 0) {
     const activeOverride = overrides.find(
       (o) =>
         o.active &&
         o.joRoNumber.toUpperCase() === item.joRoNumber.toUpperCase() &&
-        (o.testingLineId === item.testingLineId || !item.testingLineId)
+        (o.testingLineId === activeLineId || !activeLineId)
     );
     if (activeOverride) {
       return activeOverride.overrideDuration / 60;
     }
   }
 
-  if (item.testingLineId) {
-    const line = lines.find((l) => l.id === item.testingLineId);
+  if (activeLineId) {
+    const line = lines.find((l) => l.id === activeLineId);
     if (line && line.standardDurationMinutes > 0) {
       return line.standardDurationMinutes / 60;
     }
@@ -110,11 +111,9 @@ export function calculateOverallCapacity(
   let totalPlannedHours = 0;
 
   const lineSummaries: LineCapacitySummary[] = activeLines.map((line) => {
-    // JOs assigned to this line or matching group/process
+    // JOs assigned to this line
     const lineJOs = queue.filter(
-      (q) =>
-        q.testingLineId === line.id ||
-        (!q.testingLineId && q.compGroup === line.componentGroup)
+      (q) => (q.currentTestingLineId || q.testingLineId) === line.id
     );
 
     const runningCount = lineJOs.filter((q) => q.status === 'ON_PROCESS').length;
@@ -198,10 +197,11 @@ export function calculateScheduleForQueue(
 
   return sortedQueue.map((item) => {
     const durationHours = getEstimatedDurationHours(item, lines, overrides);
-    const lineKey = item.testingLineId || item.compGroup;
+    const activeLineId = item.currentTestingLineId || item.testingLineId;
+    const lineKey = activeLineId || item.compGroup;
 
     // Get specific operating hours for line
-    const line = lines.find((l) => l.id === item.testingLineId);
+    const line = lines.find((l) => l.id === activeLineId);
     let lineStartH = 8;
     let lineStartM = 0;
     let lineEndH = 17;
@@ -257,8 +257,8 @@ export function calculateScheduleForQueue(
     linePointers[lineKey] = new Date(finishTime);
 
     // Match assigned line name
-    let assignedLineName = item.testingLineId
-      ? lines.find((l) => l.id === item.testingLineId)?.name || 'Default'
+    let assignedLineName = activeLineId
+      ? lines.find((l) => l.id === activeLineId)?.name || 'Default'
       : `${item.compGroup} Line`;
 
     return {

@@ -101,19 +101,7 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
   const renderLineRow = (line: TestingLine) => {
     // Find JOs matching this line
     const lineJobs = queueRecords.filter((q) => {
-      if (q.testingLineId === line.id) return true;
-      if (!q.testingLineId) {
-        // Fallback match by component group and process
-        if (line.componentGroup === 'Engine' && q.compGroup === 'Engine') {
-          if (line.process === 'GLT' && q.gltStatus !== 'GOOD') return true;
-          if (line.process === 'Dynotest' && q.gltStatus === 'GOOD') return true;
-        }
-        if (line.componentGroup !== 'Engine' && q.compGroup !== 'Engine') {
-          if (line.process === 'GLT' && q.gltStatus !== 'GOOD') return true;
-          if (line.process === 'Testbench' && q.gltStatus === 'GOOD') return true;
-        }
-      }
-      return false;
+      return (q.currentTestingLineId || q.testingLineId) === line.id;
     });
 
     return (

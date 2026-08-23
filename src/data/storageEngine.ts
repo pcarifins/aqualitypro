@@ -162,16 +162,21 @@ class DataStore {
       }
     });
 
-    const unSubQueue = subscribeToCollection<QueueRecord>('priorityQueue', (data) => {
+    const unSubQueue = subscribeToCollection<QueueRecord>('priorityQueue', async (data) => {
       if (data) {
         // preserve field fallback
-        this.queueRecords = data.map((q) => ({
+        const mapped = data.map((q) => ({
           ...q,
           queueRecordId: q.queueRecordId || (q as any).id,
         }));
-        this.normalizeQueuePriorities();
-        this.saveToStorageCache();
-        this.notifyListeners();
+        
+        const updated = await this.ensureTestingLineAssignments(mapped);
+        if (!updated) {
+          this.queueRecords = mapped;
+          this.normalizeQueuePriorities();
+          this.saveToStorageCache();
+          this.notifyListeners();
+        }
       }
     });
 
@@ -1345,7 +1350,79 @@ class DataStore {
     this.notifyListeners();
   }
 
+  public async ensureTestingLineAssignments(records: QueueRecord[]): Promise<boolean> {
+    let hasUpdated = false;
+    const { writeBatch, doc } = await import('firebase/firestore');
+    const { db } = await import('../lib/firebase');
+    const batch = writeBatch(db);
+    
+    for (const q of records) {
+      // Determine canonical line based on gltStatus and compGroup
+      let canonicalLineId = q.currentTestingLineId || q.testingLineId;
+      
+      if (q.gltStatus !== 'GOOD') {
+        const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+        if (canonicalLineId !== gltLine) {
+          canonicalLineId = gltLine;
+        }
+      } else {
+        // If gltStatus is 'GOOD', but currently assigned line is a GLT line or missing
+        if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
+          if (q.compGroup === 'Engine') {
+            canonicalLineId = 'dyno-1';
+          } else if (q.compGroup === 'Cylinder') {
+            canonicalLineId = 'tb-4-cyl';
+          } else {
+            canonicalLineId = 'tb-1'; // PT-PPM
+          }
+        }
+      }
+      
+      // If there's a missing or mismatched canonical line ID
+      if (q.currentTestingLineId !== canonicalLineId || q.testingLineId !== canonicalLineId) {
+        q.currentTestingLineId = canonicalLineId;
+        q.testingLineId = canonicalLineId;
+        q.updatedAt = new Date().toISOString();
+        
+        try {
+          const docRef = doc(db, 'priorityQueue', q.queueRecordId);
+          batch.set(docRef, sanitizeFirestoreValue(q), { merge: true });
+          hasUpdated = true;
+        } catch (e) {
+          console.error("Error batching line update:", e);
+        }
+      }
+    }
+    
+    if (hasUpdated) {
+      try {
+        await batch.commit();
+      } catch (e) {
+        console.error("Error committing batch line updates:", e);
+      }
+    }
+    return hasUpdated;
+  }
+
   public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
+    // Assign canonical line before saving
+    let canonicalLineId = record.currentTestingLineId || record.testingLineId;
+    if (record.gltStatus !== 'GOOD') {
+      canonicalLineId = record.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+    } else {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
+        if (record.compGroup === 'Engine') {
+          canonicalLineId = 'dyno-1';
+        } else if (record.compGroup === 'Cylinder') {
+          canonicalLineId = 'tb-4-cyl';
+        } else {
+          canonicalLineId = 'tb-1';
+        }
+      }
+    }
+    record.currentTestingLineId = canonicalLineId;
+    record.testingLineId = canonicalLineId;
+
     // FIRESTORE FIRST
     await saveDocument('priorityQueue', record);
 
@@ -1381,6 +1458,30 @@ class DataStore {
     if (idx < 0) {
       throw new Error(`Queue record not found: ${queueRecordId}`);
     }
+
+    // Determine canonical line if being updated or if status/gltStatus changed
+    const mergedRecord = { ...this.queueRecords[idx], ...updates };
+    let canonicalLineId = updates.currentTestingLineId || updates.testingLineId || mergedRecord.currentTestingLineId || mergedRecord.testingLineId;
+
+    if (mergedRecord.gltStatus !== 'GOOD') {
+      const gltLine = mergedRecord.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+      if (canonicalLineId !== gltLine) {
+        canonicalLineId = gltLine;
+      }
+    } else {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
+        if (mergedRecord.compGroup === 'Engine') {
+          canonicalLineId = 'dyno-1';
+        } else if (mergedRecord.compGroup === 'Cylinder') {
+          canonicalLineId = 'tb-4-cyl';
+        } else {
+          canonicalLineId = 'tb-1';
+        }
+      }
+    }
+
+    updates.currentTestingLineId = canonicalLineId;
+    updates.testingLineId = canonicalLineId;
 
     const updatedRecord: QueueRecord = {
       ...this.queueRecords[idx],

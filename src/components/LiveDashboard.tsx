@@ -86,31 +86,14 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     // 1. Find running JO for this station
     const runningJO = queueRecords.find((q) => {
       if (q.status !== 'ON_PROCESS') return false;
-      if (q.testingLineId === line.id) return true;
-      // Fallback matching by process and component group
-      if (!q.testingLineId) {
-        if (line.componentGroup === 'Engine' && q.compGroup === 'Engine') {
-          if (line.process === 'GLT' && q.gltStatus !== 'GOOD') return true;
-          if (line.process === 'Dynotest' && q.gltStatus === 'GOOD') return true;
-        }
-        if (line.componentGroup !== 'Engine' && q.compGroup !== 'Engine') {
-          if (line.process === 'GLT' && q.gltStatus !== 'GOOD') return true;
-          if (line.process === 'Testbench' && q.gltStatus === 'GOOD') return true;
-        }
-      }
-      return false;
+      return (q.currentTestingLineId || q.testingLineId) === line.id;
     });
 
     // 2. Find next queued JOs (sorted by priority)
     const nextJOs = queueRecords
       .filter((q) => {
         if (q.status !== 'WAITING') return false;
-        if (q.testingLineId === line.id) return true;
-        if (!q.testingLineId) {
-          if (line.componentGroup === 'Engine' && q.compGroup === 'Engine') return true;
-          if (line.componentGroup !== 'Engine' && q.compGroup !== 'Engine') return true;
-        }
-        return false;
+        return (q.currentTestingLineId || q.testingLineId) === line.id;
       })
       .sort((a, b) => a.currentPriority - b.currentPriority);
 
