@@ -179,6 +179,24 @@
         "standardDurationMinutes": { "type": "number" }
       },
       "required": ["id", "name", "process", "componentGroup"]
+    },
+    "TestOverride": {
+      "title": "TestOverride",
+      "description": "Configurable test duration overrides",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "joRoNumber": { "type": "string" },
+        "testingLineId": { "type": "string" },
+        "process": { "type": "string" },
+        "defaultDuration": { "type": "number" },
+        "overrideDuration": { "type": "number" },
+        "reason": { "type": "string" },
+        "active": { "type": "boolean" },
+        "changedBy": { "type": "string" },
+        "changedAt": { "type": "string" }
+      },
+      "required": ["id", "joRoNumber", "testingLineId", "process", "overrideDuration"]
     }
   },
   "firestore": {
@@ -195,6 +213,7 @@
     "pdfReports": { "schema": "PDFReport", "description": "PDF test reports collection" },
     "auditLogs": { "schema": "AuditLog", "description": "Audit log records collection" },
     "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" },
-    "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" }
+    "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" },
+    "testOverrides": { "schema": "TestOverride", "description": "Test duration overrides collection" }
   }
 }
