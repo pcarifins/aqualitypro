@@ -195,8 +195,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [stats, setStats] = useState<DashboardStats>(initialStats);
   const [historyRecords, setHistoryRecords] = useState<CombinedJORecords[]>([]);
   const [selectedCompGroup, setSelectedCompGroup] = useState<CompGroup | 'All'>('All');
-  const [dateRange, setDateRange] = useState<'all' | '30days' | '90days'>('all');
-  const [selectedMechanic, setSelectedMechanic] = useState<string>('All');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
   const [selectedStage, setSelectedStage] = useState<'All' | 'GLT' | 'Dynotest' | 'Hydraulic Test'>('All');
   
   const [isLoading, setIsLoading] = useState(false);
@@ -213,21 +213,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     if (selectedCompGroup !== 'All') {
       filterParams.compGroup = selectedCompGroup;
     }
-    if (selectedMechanic !== 'All') {
-      filterParams.assemblyMechanic = selectedMechanic;
-    }
     if (selectedStage !== 'All') {
       filterParams.testProcess = selectedStage as any;
     }
-
-    if (dateRange === '30days') {
-      const d = new Date();
-      d.setDate(d.getDate() - 30);
-      filterParams.startDate = d.toISOString();
-    } else if (dateRange === '90days') {
-      const d = new Date();
-      d.setDate(d.getDate() - 90);
-      filterParams.startDate = d.toISOString();
+    if (fromDate) {
+      filterParams.dateFrom = fromDate;
+    }
+    if (toDate) {
+      filterParams.dateTo = toDate;
     }
 
     try {
@@ -246,7 +239,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   useEffect(() => {
     fetchFilteredStats();
-  }, [selectedCompGroup, dateRange, selectedMechanic, selectedStage]);
+  }, [selectedCompGroup, fromDate, toDate, selectedStage]);
 
   // Generate Gemini-powered operational summary
   const generateAiSummary = async () => {
@@ -371,7 +364,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
           <div>
             <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
               Comp Group
@@ -379,7 +372,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <select
               value={selectedCompGroup}
               onChange={(e) => setSelectedCompGroup(e.target.value as any)}
-              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full"
+              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full cursor-pointer"
             >
               <option value="All">All Groups</option>
               <option value="Engine">Engine</option>
@@ -390,17 +383,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
           <div>
             <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-              Time Range
+              From Date
             </label>
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as any)}
-              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full"
-            >
-              <option value="all">All Time</option>
-              <option value="30days">Last 30 Days</option>
-              <option value="90days">Last 90 Days</option>
-            </select>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full cursor-pointer [color-scheme:dark]"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
+              To Date
+            </label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full cursor-pointer [color-scheme:dark]"
+            />
           </div>
 
           <div>
@@ -410,7 +412,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <select
               value={selectedStage}
               onChange={(e) => setSelectedStage(e.target.value as any)}
-              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full"
+              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full cursor-pointer"
             >
               <option value="All">All Stages</option>
               <option value="GLT">GLT Only</option>
@@ -418,29 +420,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <option value="Hydraulic Test">Hydraulic Test</option>
             </select>
           </div>
-
-          <div>
-            <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-              Mechanic
-            </label>
-            <select
-              value={selectedMechanic}
-              onChange={(e) => setSelectedMechanic(e.target.value)}
-              className="bg-slate-950 border border-slate-700 text-xs text-white rounded-xl px-2.5 py-1.5 font-semibold focus:outline-none focus:border-purple-500 w-full"
-            >
-              <option value="All">All Mechanics</option>
-              {mechanicList.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
-      {/* Primary KPI Cards (Top pane exactly preserved) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Primary KPI Cards (Top pane exactly preserved, adjusted cleanly to 3 columns) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
             <BarChart3 className="w-3.5 h-3.5 text-blue-400" />
@@ -454,17 +438,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span>•</span>
             <span className="text-rose-400 font-bold">{stats.totalNotGood} NOT GOOD</span>
           </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
-            <XCircle className="w-3.5 h-3.5 text-rose-400" />
-            <span>1st Attempt NG Rate</span>
-          </div>
-          <div className="text-2xl font-black text-rose-400">
-            {stats.ngRatioPercent}%
-          </div>
-          <p className="text-[10px] text-slate-500 font-semibold">Defect rate on initial testing pass</p>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">

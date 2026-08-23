@@ -79,7 +79,7 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
                 <Printer className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-200">Official Test Report & Quality Cert</div>
+                <div className="text-xs font-bold text-slate-200">Official Test Report</div>
                 <div className="text-[10px] text-slate-400">Generate printable ISO/OEM formatted report</div>
               </div>
             </div>

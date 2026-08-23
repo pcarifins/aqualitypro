@@ -27,8 +27,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { JODetailModal } from './components/JODetailModal';
 import { ApkModal } from './components/ApkModal';
 import { LoginScreen } from './components/LoginScreen';
-import { GoogleSheetsModal } from './components/GoogleSheetsModal';
-import { googleSheetsService } from './services/googleSheetsService';
+import { SharePointModal } from './components/SharePointModal';
 import { getUserPermissions } from './utils/permissions';
 import { QueueRecord } from './types';
 
@@ -200,116 +199,18 @@ export default function App() {
 
   const handleSaveGLT = async (record: GLTRecord) => {
     await apiClient.saveGLTRecord(record);
-    // Background live append to Google Sheets if connected
-    try {
-      const token = googleSheetsService.getAccessToken();
-      const cfg = googleSheetsService.getConfig();
-      if (token && cfg.spreadsheetId) {
-        googleSheetsService.appendRecord(
-          token,
-          cfg.spreadsheetId,
-          'GLT_Inspection_Log',
-          [
-            record.id,
-            record.joNumber,
-            record.unitModel || record.productModel,
-            record.component || record.productModel,
-            record.productCategory,
-            record.customer || '-',
-            record.serialNumber || '-',
-            record.partNumber || '-',
-            record.assemblyMechanic || '-',
-            record.operatorName || record.testerName || '-',
-            record.testDate,
-            record.result,
-            record.ngItem || record.leakLocation || '-',
-            record.ngDescription || record.leakDescription || '-',
-            record.remarks || '-',
-            record.submissionTime || new Date().toISOString(),
-          ]
-        );
-      }
-    } catch (e) {
-      console.warn('Sheets auto-sync notice:', e);
-    }
     await refreshData();
     return record;
   };
 
   const handleSaveDyno = async (record: DynotestRecord) => {
     await apiClient.saveDynoRecord(record);
-    // Background live append to Google Sheets if connected
-    try {
-      const token = googleSheetsService.getAccessToken();
-      const cfg = googleSheetsService.getConfig();
-      if (token && cfg.spreadsheetId) {
-        googleSheetsService.appendRecord(
-          token,
-          cfg.spreadsheetId,
-          'Dynotest_Engine_Log',
-          [
-            record.id,
-            record.joNumber,
-            record.compGroup || 'ENGINE',
-            record.unitModel || '-',
-            record.component || '-',
-            record.operatorName,
-            record.receivingTime,
-            record.dynoLeadTimeMinutes || 0,
-            record.result,
-            record.powerOutputKw || '-',
-            record.torqueNm || '-',
-            record.oilTempCelsius || '-',
-            record.blowbyKpa || '-',
-            record.ngItem || '-',
-            record.ngDescription || '-',
-            record.remarks || '-',
-            record.submissionTime || '',
-          ]
-        );
-      }
-    } catch (e) {
-      console.warn('Sheets auto-sync notice:', e);
-    }
     await refreshData();
     return record;
   };
 
   const handleSaveHydraulic = async (record: HydraulicRecord) => {
     await apiClient.saveHydraulicRecord(record);
-    // Background live append to Google Sheets if connected
-    try {
-      const token = googleSheetsService.getAccessToken();
-      const cfg = googleSheetsService.getConfig();
-      if (token && cfg.spreadsheetId) {
-        googleSheetsService.appendRecord(
-          token,
-          cfg.spreadsheetId,
-          'Hydraulic_Bench_Log',
-          [
-            record.id,
-            record.joNumber,
-            record.compGroup || 'POWER_TRAIN',
-            record.unitModel || '-',
-            record.component || '-',
-            record.operatorName,
-            record.receivingTime,
-            record.hydraulicLeadTimeMinutes || 0,
-            record.result,
-            record.mainReliefPressureBar || '-',
-            record.flowRateLpm || '-',
-            record.internalLeakageMlMin || '-',
-            record.oilTemperatureCelsius || '-',
-            record.ngItem || '-',
-            record.ngDescription || '-',
-            record.remarks || '-',
-            record.submissionTime || '',
-          ]
-        );
-      }
-    } catch (e) {
-      console.warn('Sheets auto-sync notice:', e);
-    }
     await refreshData();
     return record;
   };
@@ -510,7 +411,7 @@ export default function App() {
             assemblers={assemblers}
             productModels={productModels}
             templates={templates}
-            checksheets={checksheets}
+            testingLines={testingLines}
             onOpenSheetsModal={() => setShowSheetsModal(true)}
             onSaveAssembler={async (asm) => {
               await apiClient.saveAssembler(asm);
@@ -575,12 +476,12 @@ export default function App() {
         />
       )}
 
-      {/* Google Sheets Integration Modal */}
-      <GoogleSheetsModal
+      {/* SharePoint Integration Modal */}
+      <SharePointModal
         isOpen={showSheetsModal}
         onClose={() => setShowSheetsModal(false)}
-        historyRecords={historyRecords}
-        queueRecords={queueRecords}
+        currentUser={authenticatedUser}
+        onShowToast={(msg) => alert(msg)}
       />
 
       {/* APK / PWA Download Modal */}

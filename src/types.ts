@@ -163,6 +163,25 @@ export interface TestingLine {
   displayOrder: number;
   createdAt?: string;
   updatedAt?: string;
+  operatingDays?: string[];
+  startTime?: string;
+  endTime?: string;
+  breakMinutes?: number;
+  netOperatingMinutes?: number;
+  updatedBy?: string;
+}
+
+export interface TestOverride {
+  id: string;
+  joRoNumber: string;
+  testingLineId: string;
+  process: TestProcess;
+  defaultDuration: number;
+  overrideDuration: number;
+  reason: string;
+  active: boolean;
+  changedBy: string;
+  changedAt: string;
 }
 
 // Queue Record Data Model

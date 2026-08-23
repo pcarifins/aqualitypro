@@ -13,7 +13,7 @@ import {
   Sparkles,
   QrCode,
 } from 'lucide-react';
-import { CombinedJORecords, PDFTestReportRecord, QualityCertificateRecord } from '../types';
+import { CombinedJORecords, PDFTestReportRecord } from '../types';
 import { pdfReportService } from '../services/pdfReportService';
 
 interface PDFReportModalProps {
@@ -23,16 +23,12 @@ interface PDFReportModalProps {
 }
 
 export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'REPORT' | 'CERTIFICATE'>('REPORT');
   const [reportRecord] = useState<PDFTestReportRecord>(() =>
     pdfReportService.generateTestReportRecord(jo, currentUser)
   );
-  const [certRecord] = useState<QualityCertificateRecord>(() =>
-    pdfReportService.generateQualityCertificateRecord(jo, currentUser)
-  );
 
   const handlePrint = () => {
-    pdfReportService.printReportHtml(reportRecord.dataSnapshot);
+    pdfReportService.printReportHtml(reportRecord.dataSnapshot, jo);
   };
 
   const isPassed = jo.currentOverallStatus === 'GOOD';
@@ -42,6 +38,12 @@ export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, cur
   const latestGLT = jo.gltRecords[jo.gltRecords.length - 1];
   const latestDyno = jo.dynoRecords[jo.dynoRecords.length - 1];
   const latestHyd = jo.hydraulicRecords[jo.hydraulicRecords.length - 1];
+
+  const allTrials = [
+    ...jo.gltRecords.map(r => ({ stageName: 'General Leak Test', attempt: r.attemptNumber, operator: r.testerName || r.operatorName, date: r.testDate, answers: r.answers, result: r.result })),
+    ...jo.dynoRecords.map(r => ({ stageName: 'Engine Dynamometer Test', attempt: r.attemptNumber, operator: r.operatorName, date: r.submissionTime?.split('T')[0] || r.receivingTime?.split('T')[0], answers: r.answers, result: r.result })),
+    ...jo.hydraulicRecords.map(r => ({ stageName: 'Hydraulic Test Bench', attempt: r.attemptNumber, operator: r.operatorName, date: r.submissionTime?.split('T')[0] || r.receivingTime?.split('T')[0], answers: r.answers, result: r.result }))
+  ].filter(s => s.answers && s.answers.length > 0);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
@@ -68,34 +70,6 @@ export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, cur
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* Tab switch */}
-            <div className="bg-slate-200 p-1 rounded-xl flex space-x-1">
-              <button
-                onClick={() => setActiveTab('REPORT')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                  activeTab === 'REPORT'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <FileCheck className="w-3.5 h-3.5" />
-                <span>Test Report</span>
-              </button>
-              {isPassed && (
-                <button
-                  onClick={() => setActiveTab('CERTIFICATE')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                    activeTab === 'CERTIFICATE'
-                      ? 'bg-amber-500 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Award className="w-3.5 h-3.5" />
-                  <span>Certificate</span>
-                </button>
-              )}
-            </div>
-
             <button
               onClick={onClose}
               className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-200 transition-all"
@@ -107,9 +81,8 @@ export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, cur
 
         {/* Modal Body: Document Preview */}
         <div className="flex-1 overflow-y-auto p-6 bg-slate-100/70">
-          {activeTab === 'REPORT' ? (
-            /* TEST REPORT PREVIEW */
-            <div className="bg-white rounded-xl shadow-lg border border-slate-300 p-8 max-w-3xl mx-auto space-y-6 text-slate-800 font-sans text-xs">
+          {/* TEST REPORT PREVIEW */}
+          <div className="bg-white rounded-xl shadow-lg border border-slate-300 p-8 max-w-3xl mx-auto space-y-6 text-slate-800 font-sans text-xs">
               {/* Document Header */}
               <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
                 <div>
@@ -279,6 +252,82 @@ export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, cur
                 </div>
               )}
 
+              {/* Trial Checksheets Section (E3) */}
+              {allTrials.length > 0 && (
+                <div className="space-y-4 pt-6 border-t border-slate-200">
+                  <h3 className="font-black text-xs uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-1">
+                    3. Completed Trial Checksheets
+                  </h3>
+                  {allTrials.map((trial, tIdx) => (
+                    <div key={tIdx} className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+                      <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between font-bold text-slate-700 gap-2">
+                        <span>Stage: {trial.stageName} (Attempt #{trial.attempt})</span>
+                        <div className="flex items-center space-x-3 text-[11px]">
+                          <span>Operator: <span className="font-medium text-slate-600">{trial.operator}</span></span>
+                          <span>•</span>
+                          <span>Date: <span className="font-medium text-slate-600">{trial.date}</span></span>
+                          <span>•</span>
+                          <span className={trial.result === 'GOOD' ? 'text-emerald-700' : 'text-rose-700'}>{trial.result}</span>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-100/60 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
+                              <th className="px-3 py-1.5 text-center w-10">#</th>
+                              <th className="px-3 py-1.5">Parameter</th>
+                              <th className="px-3 py-1.5">Section</th>
+                              <th className="px-3 py-1.5">Reference Limit</th>
+                              <th className="px-3 py-1.5">Actual Value</th>
+                              <th className="px-3 py-1.5 text-center w-16">Verdict</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {trial.answers!.map((ans, aIdx) => {
+                              let stdRange = '-';
+                              if (ans.validationSnapshot && ans.validationSnapshot !== 'NONE') {
+                                if (ans.validationSnapshot === 'RANGE') {
+                                  stdRange = `${ans.minimumSnapshot ?? '-'} – ${ans.maximumSnapshot ?? '-'} ${ans.unitSnapshot || ''}`.trim();
+                                } else if (ans.validationSnapshot === 'MINIMUM') {
+                                  stdRange = `Min ${ans.minimumSnapshot ?? '-'} ${ans.unitSnapshot || ''}`.trim();
+                                } else if (ans.validationSnapshot === 'MAXIMUM') {
+                                  stdRange = `Max ${ans.maximumSnapshot ?? '-'} ${ans.unitSnapshot || ''}`.trim();
+                                } else if (ans.validationSnapshot === 'TARGET_TOLERANCE') {
+                                  stdRange = `${ans.targetSnapshot ?? '-'} ± ${ans.toleranceSnapshot ?? '-'} ${ans.unitSnapshot || ''}`.trim();
+                                }
+                              } else if (ans.inputTypeSnapshot === 'GOOD / NOT GOOD' || ans.inputTypeSnapshot === 'GOOD/NOT GOOD') {
+                                stdRange = 'GOOD';
+                              }
+
+                              return (
+                                <tr key={ans.id} className="hover:bg-slate-50/50 text-[11px] text-slate-700">
+                                  <td className="px-3 py-1.5 text-center text-slate-400 font-medium">{aIdx + 1}</td>
+                                  <td className="px-3 py-1.5 font-semibold text-slate-900">{ans.itemNameSnapshot}</td>
+                                  <td className="px-3 py-1.5 text-slate-500">{ans.sectionSnapshot || 'Main'}</td>
+                                  <td className="px-3 py-1.5 font-mono text-slate-600">{stdRange}</td>
+                                  <td className="px-3 py-1.5 font-bold font-mono text-slate-900">{ans.answer} {ans.unitSnapshot || ''}</td>
+                                  <td className="px-3 py-1.5 text-center">
+                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      ans.resultStatus === 'PASS' 
+                                        ? 'bg-emerald-100 text-emerald-800' 
+                                        : ans.resultStatus === 'FAIL' 
+                                        ? 'bg-rose-100 text-rose-800' 
+                                        : 'bg-slate-100 text-slate-600'
+                                    }`}>
+                                      {ans.resultStatus || '-'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Signatures & Approvals */}
               <div className="pt-6 border-t-2 border-slate-200 grid grid-cols-3 gap-4 text-center">
                 <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-6">
@@ -303,77 +352,6 @@ export const PDFReportModal: React.FC<PDFReportModalProps> = ({ jo, onClose, cur
                 </div>
               </div>
             </div>
-          ) : (
-            /* QUALITY CERTIFICATE PREVIEW */
-            <div className="bg-gradient-to-b from-amber-50 to-white rounded-2xl shadow-xl border-4 border-amber-400/80 p-8 max-w-2xl mx-auto space-y-6 text-slate-800 font-sans text-center relative overflow-hidden">
-              <div className="absolute -right-8 -top-8 w-32 h-32 bg-amber-200/50 rounded-full blur-xl pointer-events-none" />
-              <div className="absolute -left-8 -bottom-8 w-32 h-32 bg-amber-200/50 rounded-full blur-xl pointer-events-none" />
-
-              <div className="flex justify-center">
-                <div className="w-16 h-16 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-lg">
-                  <Award className="w-9 h-9" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-widest text-amber-800">
-                  PT KOMATSU REMANUFACTURING ASIA — QUALITY ASSURANCE
-                </span>
-                <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
-                  Certificate of Quality & Performance
-                </h1>
-                <p className="text-xs text-slate-600 max-w-md mx-auto">
-                  This document certifies that the remanufactured component listed below has successfully undergone full quality inspection and test bench performance validation in accordance with OEM standards.
-                </p>
-              </div>
-
-              {/* Certificate Card */}
-              <div className="bg-white/80 backdrop-blur-xs border border-amber-200 rounded-xl p-5 text-left text-xs space-y-2 shadow-xs">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <span className="text-slate-500 text-[10px] uppercase block font-bold">Job Order Number</span>
-                    <strong className="text-sm font-mono text-slate-900">{jo.joNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 text-[10px] uppercase block font-bold">Certificate Number</span>
-                    <strong className="text-xs font-mono text-amber-900">{certRecord.certificateNumber || certRecord.certNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 text-[10px] uppercase block font-bold">Unit Model & Component</span>
-                    <strong className="text-slate-900">{unitModel} — {componentName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 text-[10px] uppercase block font-bold">Serial Number</span>
-                    <strong className="font-mono text-slate-900">{jo.serialNumber || latestGLT?.serialNumber || 'N/A'}</strong>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-amber-100 flex items-center justify-between text-[11px]">
-                  <span>Customer: <strong>{jo.customer || latestGLT?.customer || 'Internal Stock'}</strong></span>
-                  <span>Issued Date: <strong>{new Date(certRecord.generatedAt || certRecord.issuedAt || Date.now()).toLocaleDateString()}</strong></span>
-                </div>
-              </div>
-
-              {/* Stamp & Seal */}
-              <div className="flex items-center justify-around pt-4 border-t border-amber-200 text-xs">
-                <div className="text-center">
-                  <div className="w-16 h-16 mx-auto rounded-full border-2 border-dashed border-amber-500 flex flex-col items-center justify-center text-amber-700 font-bold text-[9px] uppercase tracking-tighter rotate-[-12deg] bg-amber-50/50">
-                    <span>KRA QA</span>
-                    <span className="font-black text-[10px]">VERIFIED</span>
-                    <span>PASS</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500 mt-1 block">Official Quality Stamp</span>
-                </div>
-
-                <div className="text-center space-y-1">
-                  <div className="font-black text-slate-900 underline text-xs">
-                    {currentUser || 'QA Department'}
-                  </div>
-                  <span className="text-[10px] text-slate-500 block">Authorized Quality Signatory</span>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Modal Footer */}

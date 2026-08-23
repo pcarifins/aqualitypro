@@ -578,19 +578,6 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
               className="w-full bg-slate-100 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs font-semibold"
             />
           </div>
-
-          <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">GLT Status</label>
-            <span
-              className={`inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-semibold ${
-                isRetest
-                  ? 'bg-slate-100 text-slate-600'
-                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold'
-              }`}
-            >
-              {isRetest ? 'N/A (Bypassed for RETEST)' : 'GOOD (Passed GLT)'}
-            </span>
-          </div>
         </div>
 
         {/* Receive at Testbench Button & Lead Time Calculation */}
@@ -606,23 +593,12 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
             </button>
           ) : (
             <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-              <div className="flex items-center space-x-2 text-cyan-800 font-semibold">
+              <div className="flex items-center space-x-2 text-cyan-800 font-semibold w-full">
                 <CheckCircle2 className="w-4 h-4 text-cyan-600" />
                 <span>
                   Received at: <strong className="font-mono">{formatDateTime(receivingTime)}</strong>
                 </span>
               </div>
-
-              {!isRetest && gltLeadTimeMinutes !== undefined && (
-                <div className="text-cyan-900 font-bold bg-cyan-100/70 px-2.5 py-1 rounded-lg border border-cyan-200">
-                  GLT Lead Time: {formatDuration(gltLeadTimeMinutes)}
-                </div>
-              )}
-              {isRetest && (
-                <div className="text-slate-600 font-semibold bg-slate-100 px-2.5 py-1 rounded-lg">
-                  GLT Lead Time: N/A (Retest)
-                </div>
-              )}
             </div>
           )}
         </div>

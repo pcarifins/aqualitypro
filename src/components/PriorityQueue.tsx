@@ -22,8 +22,9 @@ import {
   Gauge,
   Calendar,
 } from 'lucide-react';
-import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine } from '../types';
+import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine, TestOverride } from '../types';
 import { apiClient } from '../api/client';
+import { store } from '../data/storageEngine';
 import { calculateOverallCapacity, calculateScheduleForQueue } from '../utils/capacityCalculator';
 import { CapacityKPICards } from './CapacityKPICards';
 import { TestingLinesCapacitySection } from './TestingLinesCapacitySection';
@@ -46,6 +47,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [queueList, setQueueList] = useState<QueueRecord[]>([]);
   const [productModels, setProductModels] = useState<ProductModel[]>([]);
   const [testingLines, setTestingLines] = useState<TestingLine[]>([]);
+  const [testOverrides, setTestOverrides] = useState<TestOverride[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmittingJO, setIsSubmittingJO] = useState(false);
@@ -96,16 +98,32 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     setTestingLines(lines || []);
   };
 
+  const loadTestOverrides = async () => {
+    const overrides = await apiClient.getTestOverrides();
+    setTestOverrides(overrides || []);
+  };
+
   useEffect(() => {
     loadQueue();
     loadProductModels();
     loadTestingLines();
+    loadTestOverrides();
+
+    const unsubscribe = store.subscribe(() => {
+      loadQueue();
+      loadTestingLines();
+      loadTestOverrides();
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Compute Overall Capacity & Line Statistics
   const overallCapacityStats = useMemo(() => {
-    return calculateOverallCapacity(queueList, testingLines);
-  }, [queueList, testingLines]);
+    return calculateOverallCapacity(queueList, testingLines, testOverrides);
+  }, [queueList, testingLines, testOverrides]);
 
   const handleAssignTestingLine = async (queueRecordId: string, testingLineId: string) => {
     try {
@@ -181,8 +199,8 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
   // Compute Schedule (Est Start/Finish) for Ranked Queue
   const scheduledRankedQueue = useMemo(() => {
-    return calculateScheduleForQueue(rankedQueue, testingLines);
-  }, [rankedQueue, testingLines]);
+    return calculateScheduleForQueue(rankedQueue, testingLines, testOverrides);
+  }, [rankedQueue, testingLines, testOverrides]);
 
   const handleSyncPPC = async () => {
     setIsLoading(true);

@@ -20,6 +20,7 @@ import {
   PDFTestReportRecord,
   QualityCertificateRecord,
   ProductMasterValidationReport,
+  TestOverride,
 } from '../types';
 
 import {
@@ -44,6 +45,7 @@ import {
   subscribeToCollection,
   logAuditEvent,
   initializeAndMigrateFirestore,
+  sanitizeFirestoreValue,
 } from '../lib/firestoreSync';
 
 const STORAGE_KEYS = {
@@ -59,6 +61,7 @@ const STORAGE_KEYS = {
   TESTING_LINES: 'aquality_testing_lines_v2',
   PDF_REPORTS: 'aquality_pdf_reports_v2',
   CERTIFICATES: 'aquality_certificates_v2',
+  TEST_OVERRIDES: 'aquality_test_overrides_v2',
 };
 
 const getStorage = (key: string): string | null => {
@@ -88,6 +91,7 @@ class DataStore {
   private pdfReports: PDFTestReportRecord[] = [];
   private certificates: QualityCertificateRecord[] = [];
   private auditLogs: any[] = [];
+  private testOverrides: TestOverride[] = [];
 
   private listeners: (() => void)[] = [];
   private isInitialized = false;
@@ -165,6 +169,7 @@ class DataStore {
           ...q,
           queueRecordId: q.queueRecordId || (q as any).id,
         }));
+        this.normalizeQueuePriorities();
         this.saveToStorageCache();
         this.notifyListeners();
       }
@@ -231,6 +236,14 @@ class DataStore {
       }
     });
 
+    const unSubOverrides = subscribeToCollection<TestOverride>('testOverrides', (data) => {
+      if (data) {
+        this.testOverrides = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
     this.unsubscribeFuncs = [
       unSubUsers,
       unSubAssemblers,
@@ -245,6 +258,7 @@ class DataStore {
       unSubReports,
       unSubCertificates,
       unSubAudit,
+      unSubOverrides,
     ];
   }
 
@@ -291,6 +305,9 @@ class DataStore {
 
       const cert = getStorage(STORAGE_KEYS.CERTIFICATES);
       this.certificates = cert ? JSON.parse(cert) : [];
+
+      const ovr = getStorage(STORAGE_KEYS.TEST_OVERRIDES);
+      this.testOverrides = ovr ? JSON.parse(ovr) : [];
     } catch {
       this.resetToDefault();
     }
@@ -310,6 +327,7 @@ class DataStore {
       setStorage(STORAGE_KEYS.TESTING_LINES, JSON.stringify(this.testingLines));
       setStorage(STORAGE_KEYS.PDF_REPORTS, JSON.stringify(this.pdfReports));
       setStorage(STORAGE_KEYS.CERTIFICATES, JSON.stringify(this.certificates));
+      setStorage(STORAGE_KEYS.TEST_OVERRIDES, JSON.stringify(this.testOverrides));
     } catch {}
   }
 
@@ -1280,6 +1298,11 @@ class DataStore {
 
   public async normalizeQueuePriorities(compGroup?: CompGroup): Promise<void> {
     const groups: CompGroup[] = compGroup ? [compGroup] : ['Engine', 'PT-PPM', 'Cylinder'];
+    const { writeBatch, doc } = await import('firebase/firestore');
+    const { db } = await import('../lib/firebase');
+
+    const batch = writeBatch(db);
+    let hasChanges = false;
 
     for (const grp of groups) {
       const activeRanked = this.queueRecords
@@ -1287,9 +1310,18 @@ class DataStore {
           (q) =>
             q.compGroup === grp &&
             !q.isUrgentUnassigned &&
-            (q.status === 'WAITING' || q.status === 'ON_PROCESS')
+            q.status !== 'FINISH'
         )
-        .sort((a, b) => (a.currentPriority || 999) - (b.currentPriority || 999));
+        .sort((a, b) => {
+          if (a.status === 'ON_PROCESS' && b.status !== 'ON_PROCESS') return -1;
+          if (b.status === 'ON_PROCESS' && a.status !== 'ON_PROCESS') return 1;
+
+          const aPrio = a.currentPriority || 999;
+          const bPrio = b.currentPriority || 999;
+          if (aPrio !== bPrio) return aPrio - bPrio;
+
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
 
       for (let i = 0; i < activeRanked.length; i++) {
         const item = activeRanked[i];
@@ -1298,9 +1330,16 @@ class DataStore {
           item.currentPriority = newPrio;
           item.plannedPriority = newPrio;
           item.updatedAt = new Date().toISOString();
-          await saveDocument('priorityQueue', item);
+
+          const docRef = doc(db, 'priorityQueue', item.queueRecordId);
+          batch.set(docRef, sanitizeFirestoreValue(item), { merge: true });
+          hasChanges = true;
         }
       }
+    }
+
+    if (hasChanges) {
+      await batch.commit();
     }
     this.saveToStorageCache();
     this.notifyListeners();
@@ -1562,11 +1601,11 @@ class DataStore {
     }
     this.saveToStorageCache();
     await logAuditEvent({
-      action: 'SAVE_TESTING_LINE',
+      action: 'OPERATING_HOURS_UPDATED',
       collectionName: 'testingLines',
       documentId: line.id,
       userName: actorName,
-      details: `Saved testing line configuration for ${line.name}`,
+      details: `Updated operating hours for ${line.name}: Days=${line.operatingDays?.join(',') || 'None'}, Time=${line.startTime || 'None'}-${line.endTime || 'None'}, Break=${line.breakMinutes || 0}m, Net=${line.netOperatingMinutes || 0}m`,
     });
     this.notifyListeners();
   }
@@ -1576,6 +1615,56 @@ class DataStore {
     this.testingLines = this.testingLines.filter((l) => l.id !== id);
     this.saveToStorageCache();
     this.notifyListeners();
+  }
+
+  public getAuditLogs(): any[] {
+    return [...this.auditLogs].sort((a, b) => {
+      return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+    });
+  }
+
+  public getTestOverrides(): TestOverride[] {
+    return this.testOverrides || [];
+  }
+
+  public async saveTestOverride(override: TestOverride, actorName = 'Supervisor'): Promise<void> {
+    const isNew = !this.testOverrides.some((o) => o.id === override.id);
+    await saveDocument('testOverrides', override);
+    const idx = this.testOverrides.findIndex((o) => o.id === override.id);
+    if (idx >= 0) {
+      this.testOverrides[idx] = override;
+    } else {
+      this.testOverrides.push(override);
+    }
+    this.saveToStorageCache();
+
+    await logAuditEvent({
+      action: isNew ? 'TEST_OVERRIDE_CREATED' : 'TEST_OVERRIDE_UPDATED',
+      collectionName: 'testOverrides',
+      documentId: override.id,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} test planning override for JO ${override.joRoNumber} on Line ${override.testingLineId}: ${override.overrideDuration} min (Standard: ${override.defaultDuration} min). Reason: ${override.reason}`,
+    });
+
+    this.notifyListeners();
+  }
+
+  public async deleteTestOverride(id: string, actorName = 'Supervisor'): Promise<void> {
+    const override = this.testOverrides.find((o) => o.id === id);
+    if (override) {
+      await removeDocument('testOverrides', id);
+      this.testOverrides = this.testOverrides.filter((o) => o.id !== id);
+      this.saveToStorageCache();
+
+      await logAuditEvent({
+        action: 'TEST_OVERRIDE_DISABLED',
+        collectionName: 'testOverrides',
+        documentId: id,
+        userName: actorName,
+        details: `Disabled/Removed test planning override for JO ${override.joRoNumber} on Line ${override.testingLineId}`,
+      });
+      this.notifyListeners();
+    }
   }
 }
 

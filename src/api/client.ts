@@ -19,6 +19,7 @@ import {
   PDFTestReportRecord,
   QualityCertificateRecord,
   ProductMasterValidationReport,
+  TestOverride,
 } from '../types';
 
 import { store } from '../data/storageEngine';
@@ -252,6 +253,24 @@ export const apiClient = {
 
   deleteTestingLine: async (id: string): Promise<void> => {
     return store.deleteTestingLine(id);
+  },
+
+  // --- TEST OVERRIDES ---
+  getTestOverrides: async (): Promise<TestOverride[]> => {
+    return store.getTestOverrides();
+  },
+
+  saveTestOverride: async (override: TestOverride, actorName = 'Supervisor'): Promise<void> => {
+    return store.saveTestOverride(override, actorName);
+  },
+
+  deleteTestOverride: async (id: string, actorName = 'Supervisor'): Promise<void> => {
+    return store.deleteTestOverride(id, actorName);
+  },
+
+  // --- AUDIT LOGS ---
+  getAuditLogs: async (): Promise<any[]> => {
+    return store.getAuditLogs();
   },
 
   // --- RESET DATA ---
