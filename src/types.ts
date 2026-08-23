@@ -151,6 +151,20 @@ export interface ChecksheetTemplate {
   activatedAt?: string;
 }
 
+export interface TestingLine {
+  id: string;
+  name: string;
+  process: TestProcess;
+  componentGroup: CompGroup;
+  active: boolean;
+  operatingHoursPerDay: number;
+  standardDurationMinutes: number;
+  dailyTarget?: number;
+  displayOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // Queue Record Data Model
 export interface PriorityChangeHistory {
   oldPriority: number;
@@ -181,7 +195,9 @@ export interface QueueRecord {
   status: 'WAITING' | 'ON_PROCESS' | 'FINISH';
   gltStatus?: 'GOOD' | 'NOT_GOOD' | 'PENDING';
   gltReceivingTime?: string;
+  receivingTime?: string; // Standard receiving ISO timestamp for active testing process
   priorityLocked: boolean; // true when test starts (ON_PROCESS)
+  testingLineId?: string; // Configured Testing Line assignment
   remark?: string;
   customer?: string;
   partNumber?: string;
@@ -398,6 +414,7 @@ export interface CombinedJORecords {
   dynoRecords: DynotestRecord[];
   hydraulicRecords: HydraulicRecord[];
   latestRecordDate: string;
+  priorityHistory?: PriorityChangeHistory[];
 }
 
 export interface FilterParams {

@@ -15,6 +15,7 @@ import {
   ProductCategory,
   CompGroup,
   QueueRecord,
+  TestingLine,
   PDFTestReportRecord,
   QualityCertificateRecord,
   ProductMasterValidationReport,
@@ -238,6 +239,19 @@ export const apiClient = {
 
   generateQualityCertificate: async (jo: CombinedJORecords, user?: string): Promise<QualityCertificateRecord> => {
     return pdfReportService.generateQualityCertificateRecord(jo, user);
+  },
+
+  // --- TESTING LINES ---
+  getTestingLines: async (onlyActive = false): Promise<TestingLine[]> => {
+    return store.getTestingLines(onlyActive);
+  },
+
+  saveTestingLine: async (line: TestingLine, actorName = 'Admin'): Promise<void> => {
+    return store.saveTestingLine(line, actorName);
+  },
+
+  deleteTestingLine: async (id: string): Promise<void> => {
+    return store.deleteTestingLine(id);
   },
 
   // --- RESET DATA ---

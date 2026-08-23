@@ -16,6 +16,7 @@ import {
   CompGroup,
   TestResult,
   QueueRecord,
+  TestingLine,
   PDFTestReportRecord,
   QualityCertificateRecord,
   ProductMasterValidationReport,
@@ -34,6 +35,7 @@ import {
 
 import { INITIAL_REQUIRED_PRODUCT_MODELS } from './productMasterSeed';
 import { initialQueueRecords } from './initialQueueData';
+import { initialTestingLines } from './initialTestingLines';
 import { computeUnifiedAnalytics } from '../services/analyticsService';
 
 import {
@@ -54,6 +56,7 @@ const STORAGE_KEYS = {
   DYNO: 'aquality_dyno_v2',
   HYDRAULIC: 'aquality_hydraulic_v2',
   QUEUE: 'aquality_queue_v2',
+  TESTING_LINES: 'aquality_testing_lines_v2',
   PDF_REPORTS: 'aquality_pdf_reports_v2',
   CERTIFICATES: 'aquality_certificates_v2',
 };
@@ -81,6 +84,7 @@ class DataStore {
   private dynoRecords: DynotestRecord[] = [];
   private hydraulicRecords: HydraulicRecord[] = [];
   private queueRecords: QueueRecord[] = [];
+  private testingLines: TestingLine[] = [];
   private pdfReports: PDFTestReportRecord[] = [];
   private certificates: QualityCertificateRecord[] = [];
   private auditLogs: any[] = [];
@@ -166,6 +170,20 @@ class DataStore {
       }
     });
 
+    const unSubTestingLines = subscribeToCollection<TestingLine>('testingLines', (data) => {
+      if (data && data.length > 0) {
+        this.testingLines = data;
+        this.saveToStorageCache();
+        this.notifyListeners();
+      } else if (data && data.length === 0) {
+        // seed testing lines to firestore if empty
+        this.testingLines = [...initialTestingLines];
+        this.testingLines.forEach((tl) => saveDocument('testingLines', tl));
+        this.saveToStorageCache();
+        this.notifyListeners();
+      }
+    });
+
     const unSubGLT = subscribeToCollection<GLTRecord>('gltRecords', (data) => {
       if (data) {
         this.gltRecords = data;
@@ -220,6 +238,7 @@ class DataStore {
       unSubTemplates,
       unSubChecksheets,
       unSubQueue,
+      unSubTestingLines,
       unSubGLT,
       unSubDyno,
       unSubHydraulic,
@@ -264,6 +283,9 @@ class DataStore {
       const q = getStorage(STORAGE_KEYS.QUEUE);
       this.queueRecords = q ? JSON.parse(q) : [...initialQueueRecords];
 
+      const tl = getStorage(STORAGE_KEYS.TESTING_LINES);
+      this.testingLines = tl ? JSON.parse(tl) : [...initialTestingLines];
+
       const rep = getStorage(STORAGE_KEYS.PDF_REPORTS);
       this.pdfReports = rep ? JSON.parse(rep) : [];
 
@@ -285,6 +307,7 @@ class DataStore {
       setStorage(STORAGE_KEYS.DYNO, JSON.stringify(this.dynoRecords));
       setStorage(STORAGE_KEYS.HYDRAULIC, JSON.stringify(this.hydraulicRecords));
       setStorage(STORAGE_KEYS.QUEUE, JSON.stringify(this.queueRecords));
+      setStorage(STORAGE_KEYS.TESTING_LINES, JSON.stringify(this.testingLines));
       setStorage(STORAGE_KEYS.PDF_REPORTS, JSON.stringify(this.pdfReports));
       setStorage(STORAGE_KEYS.CERTIFICATES, JSON.stringify(this.certificates));
     } catch {}
@@ -300,6 +323,7 @@ class DataStore {
     this.dynoRecords = [...initialDynotestRecords];
     this.hydraulicRecords = [...initialHydraulicRecords];
     this.queueRecords = [...initialQueueRecords];
+    this.testingLines = [...initialTestingLines];
     this.pdfReports = [];
     this.certificates = [];
     this.saveToStorageCache();
@@ -1194,6 +1218,10 @@ class DataStore {
           entry.glts[entry.glts.length - 1].incomingTime;
       }
 
+      const queueRec = this.queueRecords.find(
+        (q) => q.joRoNumber.toUpperCase() === entry.joNumber.toUpperCase()
+      );
+
       const item: CombinedJORecords = {
         joNumber: entry.joNumber,
         compGroup: entry.compGroup,
@@ -1208,6 +1236,7 @@ class DataStore {
         dynoRecords: entry.dynos,
         hydraulicRecords: entry.hyds,
         latestRecordDate: latestDate,
+        priorityHistory: queueRec?.history || [],
       };
 
       if (filters.joNumber && !entry.joNumber.toUpperCase().includes(filters.joNumber.toUpperCase())) return;
@@ -1328,6 +1357,18 @@ class DataStore {
 
     this.saveToStorageCache();
     this.notifyListeners();
+  }
+
+  public async updateQueueRecordByJONumber(
+    joNumber: string,
+    updates: Partial<QueueRecord>
+  ): Promise<void> {
+    const target = this.queueRecords.find(
+      (q) => q.joRoNumber.toUpperCase() === joNumber.toUpperCase()
+    );
+    if (target) {
+      await this.updateQueueRecord(target.queueRecordId, updates);
+    }
   }
 
   public async reorderQueue(
@@ -1494,6 +1535,46 @@ class DataStore {
       userName: record.issuedBy || record.generatedBy || 'QC',
       details: `Issued Quality Certificate ${record.certificateNumber || record.certNumber || record.certificateId} for JO ${record.joNumber}`,
     });
+    this.notifyListeners();
+  }
+
+  // ==========================================
+  // --- TESTING LINES CONFIGURATION ---
+  // ==========================================
+  public getTestingLines(onlyActive = false): TestingLine[] {
+    let lines = [...this.testingLines];
+    if (lines.length === 0) {
+      lines = [...initialTestingLines];
+    }
+    if (onlyActive) {
+      lines = lines.filter((l) => l.active);
+    }
+    return lines.sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
+  public async saveTestingLine(line: TestingLine, actorName = 'Admin'): Promise<void> {
+    await saveDocument('testingLines', line);
+    const idx = this.testingLines.findIndex((l) => l.id === line.id);
+    if (idx >= 0) {
+      this.testingLines[idx] = line;
+    } else {
+      this.testingLines.push(line);
+    }
+    this.saveToStorageCache();
+    await logAuditEvent({
+      action: 'SAVE_TESTING_LINE',
+      collectionName: 'testingLines',
+      documentId: line.id,
+      userName: actorName,
+      details: `Saved testing line configuration for ${line.name}`,
+    });
+    this.notifyListeners();
+  }
+
+  public async deleteTestingLine(id: string): Promise<void> {
+    await removeDocument('testingLines', id);
+    this.testingLines = this.testingLines.filter((l) => l.id !== id);
+    this.saveToStorageCache();
     this.notifyListeners();
   }
 }

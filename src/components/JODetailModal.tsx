@@ -309,6 +309,52 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
             })}
           </div>
 
+          {/* PRIORITY CHANGE HISTORY */}
+          {joRecord.priorityHistory && joRecord.priorityHistory.length > 0 && (
+            <div className="space-y-2 border-t border-slate-850 pt-4">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                <span>Priority Change History</span>
+              </h3>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[11px]">
+                    <thead>
+                      <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
+                        <th className="px-3 py-2">Date / Time</th>
+                        <th className="px-3 py-2 text-center">Old</th>
+                        <th className="px-3 py-2 text-center">New</th>
+                        <th className="px-3 py-2">Changed By</th>
+                        <th className="px-3 py-2">Remark</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                      {joRecord.priorityHistory.map((hist, idx) => (
+                        <tr key={idx} className="hover:bg-slate-900/40 text-slate-300">
+                          <td className="px-3 py-2 whitespace-nowrap font-mono">
+                            {formatDateTime(hist.changedAt)}
+                          </td>
+                          <td className="px-3 py-2 text-center font-mono text-slate-400">
+                            {hist.oldPriority}
+                          </td>
+                          <td className="px-3 py-2 text-center font-mono text-blue-400 font-bold">
+                            {hist.newPriority}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-slate-200">
+                            {hist.changedBy}
+                          </td>
+                          <td className="px-3 py-2 text-slate-400 italic">
+                            {hist.remark || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={onClose}
             className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors"

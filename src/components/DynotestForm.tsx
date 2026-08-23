@@ -32,6 +32,7 @@ import {
   formatDuration,
   calculateMinutesBetween,
 } from '../utils/formatters';
+import { AITroubleshootingCard } from './AITroubleshootingCard';
 
 interface DynotestFormProps {
   currentUser: User;
@@ -161,9 +162,16 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     }
   };
 
-  const handleReceiveAtDynotest = () => {
+  const handleReceiveAtDynotest = async () => {
     const nowIso = new Date().toISOString();
     setReceivingTime(nowIso);
+    if (joNumber) {
+      await store.updateQueueRecordByJONumber(joNumber, {
+        receivingTime: nowIso,
+        status: 'ON_PROCESS',
+        priorityLocked: true,
+      });
+    }
     setToastMessage('Received at Dynotest! Testing timer started.');
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -823,6 +831,15 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* AI Troubleshooting Suggestion */}
+                <AITroubleshootingCard
+                  process="Dynotest Engine Performance Test"
+                  unitModel={unitModel}
+                  component={component}
+                  ngItem={ngItem}
+                  ngDescription={ngDescription}
+                />
               </div>
             )}
 

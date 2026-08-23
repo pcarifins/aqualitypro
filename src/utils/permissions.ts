@@ -40,7 +40,7 @@ export function getUserPermissions(user?: User | null): UserPermissions {
     canExecuteTestbench: isTestbenchOpt || isSupervisor || isAdmin || isQC || isGenericOperator,
     canManageQueue: isPPC || isSupervisor || isAdmin,
     canViewHistory: isPPC || isSupervisor || isAdmin || isQC,
-    canViewAnalytics: isSupervisor || isAdmin || isPPC || isQC,
+    canViewAnalytics: isSupervisor || isAdmin || isQC,
     canManageMasterData: isAdmin || isSupervisor,
   };
 }

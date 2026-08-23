@@ -31,6 +31,7 @@ import {
   formatDuration,
   calculateMinutesBetween,
 } from '../utils/formatters';
+import { AITroubleshootingCard } from './AITroubleshootingCard';
 
 interface TestbenchFormProps {
   currentUser: User;
@@ -159,9 +160,16 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     }
   };
 
-  const handleReceiveAtTestbench = () => {
+  const handleReceiveAtTestbench = async () => {
     const nowIso = new Date().toISOString();
     setReceivingTime(nowIso);
+    if (joNumber) {
+      await store.updateQueueRecordByJONumber(joNumber, {
+        receivingTime: nowIso,
+        status: 'ON_PROCESS',
+        priorityLocked: true,
+      });
+    }
     setToastMessage('Received at Testbench! Testing timer started.');
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -837,6 +845,15 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* AI Troubleshooting Suggestion */}
+                <AITroubleshootingCard
+                  process="Hydraulic Testbench Test"
+                  unitModel={unitModel}
+                  component={component}
+                  ngItem={ngItem}
+                  ngDescription={ngDescription}
+                />
               </div>
             )}
 

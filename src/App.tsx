@@ -10,12 +10,14 @@ import {
   HydraulicRecord,
   CombinedJORecords,
   DashboardStats,
+  TestingLine,
 } from './types';
 import { apiClient } from './api/client';
 import { store } from './data/storageEngine';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
+import { LiveDashboard } from './components/LiveDashboard';
 import { GLTForm } from './components/GLTForm';
 import { DynotestForm } from './components/DynotestForm';
 import { TestbenchForm } from './components/TestbenchForm';
@@ -32,15 +34,27 @@ import { QueueRecord } from './types';
 
 const AUTH_STORAGE_KEY = 'aquality_auth_user_v2';
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<TabType>('home');
-  const [showApkModal, setShowApkModal] = useState(false);
-  const [showSheetsModal, setShowSheetsModal] = useState(false);
-  const [queueRecords, setQueueRecords] = useState<QueueRecord[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [assemblers, setAssemblers] = useState<Assembler[]>([]);
-  const [templates, setTemplates] = useState<ChecksheetTemplate[]>([]);
+function getDefaultTabForUser(user: User | null): TabType {
+  if (!user) return 'home';
+  const roleUpper = (user.role || '').toUpperCase();
+  if (roleUpper === 'ADMIN' || user.role === 'administrator') return 'admin';
+  if (roleUpper === 'GLT_OPT') return 'glt';
+  if (roleUpper === 'DYNO_OPT') return 'dyno';
+  if (roleUpper === 'TESTBENCH_OPT') return 'hydraulic';
+  const isOperator =
+    roleUpper.includes('OPERATOR') ||
+    roleUpper.includes('OPT') ||
+    user.role === 'operator';
+  if (isOperator) {
+    const perms = getUserPermissions(user);
+    if (perms.canExecuteGLT) return 'glt';
+    if (perms.canExecuteDynotest) return 'dyno';
+    if (perms.canExecuteTestbench) return 'hydraulic';
+  }
+  return 'home';
+}
 
+export default function App() {
   // Authenticated user: null by default if not previously saved in session
   const [authenticatedUser, setAuthenticatedUser] = useState<User | null>(() => {
     if (typeof window !== 'undefined' && window.sessionStorage) {
@@ -55,6 +69,15 @@ export default function App() {
     }
     return null;
   });
+
+  const [activeTab, setActiveTab] = useState<TabType>(() => getDefaultTabForUser(authenticatedUser));
+  const [showApkModal, setShowApkModal] = useState(false);
+  const [showSheetsModal, setShowSheetsModal] = useState(false);
+  const [queueRecords, setQueueRecords] = useState<QueueRecord[]>([]);
+  const [testingLines, setTestingLines] = useState<TestingLine[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [assemblers, setAssemblers] = useState<Assembler[]>([]);
+  const [templates, setTemplates] = useState<ChecksheetTemplate[]>([]);
 
   const [productModels, setProductModels] = useState<ProductModel[]>([]);
   const [checksheets, setChecksheets] = useState<ChecksheetItem[]>([]);
@@ -78,7 +101,7 @@ export default function App() {
 
   // Load initial app data
   const refreshData = async () => {
-    const [uList, aList, mList, tList, cList, hList, dStats, qList] = await Promise.all([
+    const [uList, aList, mList, tList, cList, hList, dStats, qList, tLines] = await Promise.all([
       apiClient.getUsers(),
       apiClient.getAssemblers(),
       apiClient.getProductModels(),
@@ -87,6 +110,7 @@ export default function App() {
       apiClient.getCombinedJOHistory(),
       apiClient.getDashboardStats(),
       apiClient.getQueueRecords(),
+      apiClient.getTestingLines(),
     ]);
 
     setUsers(uList);
@@ -97,6 +121,7 @@ export default function App() {
     setHistoryRecords(hList);
     setDashboardStats(dStats);
     setQueueRecords(qList);
+    setTestingLines(tLines);
 
     // Keep authenticated user fresh with backend record
     setAuthenticatedUser((prev) => {
@@ -127,12 +152,7 @@ export default function App() {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     }
-    const roleUpper = (user.role || '').toUpperCase();
-    if (roleUpper === 'ADMIN' || user.role === 'administrator') {
-      setActiveTab('admin');
-    } else {
-      setActiveTab('home');
-    }
+    setActiveTab(getDefaultTabForUser(user));
   };
 
   const handleLogout = () => {
@@ -149,12 +169,7 @@ export default function App() {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
     }
-    const r = (u.role || '').toUpperCase();
-    if (r === 'ADMIN' || u.role === 'administrator') {
-      setActiveTab('admin');
-    } else {
-      setActiveTab('home');
-    }
+    setActiveTab(getDefaultTabForUser(u));
   };
 
   const handleNavigate = (tab: TabType, joToPreload?: string) => {
@@ -309,9 +324,55 @@ export default function App() {
       handleNavigate('admin');
     } else {
       handleOpenJODetail(joNum);
-      handleNavigate('home');
+      const targetTab = getDefaultTabForUser(authenticatedUser);
+      handleNavigate(targetTab);
     }
   };
+
+  // Enforce Home access restriction and route protection for all users
+  useEffect(() => {
+    if (authenticatedUser) {
+      const perms = getUserPermissions(authenticatedUser);
+      const roleUpper = (authenticatedUser.role || '').toUpperCase();
+      const isOperator =
+        (roleUpper.includes('OPERATOR') ||
+          roleUpper.includes('OPT') ||
+          roleUpper === 'GLT_OPT' ||
+          roleUpper === 'DYNO_OPT' ||
+          roleUpper === 'TESTBENCH_OPT') &&
+        roleUpper !== 'ADMIN' &&
+        authenticatedUser.role !== 'administrator' &&
+        roleUpper !== 'SUPERVISOR' &&
+        authenticatedUser.role !== 'supervisor' &&
+        roleUpper !== 'PPC' &&
+        roleUpper !== 'QC';
+
+      let isAllowed = true;
+
+      if (activeTab === 'admin' && !perms.canManageMasterData) {
+        isAllowed = false;
+      } else if (activeTab === 'dashboard' && !perms.canViewAnalytics) {
+        isAllowed = false;
+      } else if (activeTab === 'history' && !perms.canViewHistory) {
+        isAllowed = false;
+      } else if (activeTab === 'glt' && !perms.canExecuteGLT) {
+        isAllowed = false;
+      } else if (activeTab === 'dyno' && !perms.canExecuteDynotest) {
+        isAllowed = false;
+      } else if (activeTab === 'hydraulic' && !perms.canExecuteTestbench) {
+        isAllowed = false;
+      } else if (activeTab === 'home' && isOperator) {
+        isAllowed = false;
+      }
+
+      if (!isAllowed) {
+        const fallback = getDefaultTabForUser(authenticatedUser);
+        if (fallback !== activeTab) {
+          setActiveTab(fallback);
+        }
+      }
+    }
+  }, [authenticatedUser, activeTab]);
 
   // If user is not logged in, show Login Screen (Phase 1.1: No auto-login)
   if (!authenticatedUser) {
@@ -357,7 +418,7 @@ export default function App() {
       {/* Main View Container */}
       <main className="min-h-[calc(100vh-120px)] max-w-7xl mx-auto px-2 sm:px-4 pt-3 pb-20">
         {/* HOME / QUEUE SCREEN */}
-        {activeTab === 'home' && !isAdmin && (
+        {activeTab === 'home' && (
           <HomeScreen
             onNavigate={handleNavigate}
             historyRecords={historyRecords}
@@ -365,6 +426,16 @@ export default function App() {
             onOpenJODetail={handleOpenJODetail}
             userRole={authenticatedUser.role}
             currentUserName={authenticatedUser.name}
+          />
+        )}
+
+        {/* LIVE DASHBOARD TESTING MONITORING & TIMELINE */}
+        {activeTab === 'live' && (
+          <LiveDashboard
+            queueRecords={queueRecords}
+            testingLines={testingLines}
+            currentUser={authenticatedUser}
+            onSelectJO={handleOpenJODetail}
           />
         )}
 
@@ -432,7 +503,7 @@ export default function App() {
         )}
 
         {/* ADMINISTRATOR MASTER DATA & RBAC PANEL */}
-        {(activeTab === 'admin' || isAdmin) && permissions.canManageMasterData && (
+        {activeTab === 'admin' && permissions.canManageMasterData && (
           <AdminPanel
             currentUser={authenticatedUser}
             users={users}

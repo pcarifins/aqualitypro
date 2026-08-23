@@ -164,6 +164,21 @@
         "completed": { "type": "boolean" }
       },
       "required": ["completed"]
+    },
+    "TestingLine": {
+      "title": "TestingLine",
+      "description": "Configurable testing lines and capacity parameters",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "process": { "type": "string" },
+        "componentGroup": { "type": "string" },
+        "active": { "type": "boolean" },
+        "operatingHoursPerDay": { "type": "number" },
+        "standardDurationMinutes": { "type": "number" }
+      },
+      "required": ["id", "name", "process", "componentGroup"]
     }
   },
   "firestore": {
@@ -179,6 +194,7 @@
     "certificates": { "schema": "Certificate", "description": "Quality certificates collection" },
     "pdfReports": { "schema": "PDFReport", "description": "PDF test reports collection" },
     "auditLogs": { "schema": "AuditLog", "description": "Audit log records collection" },
-    "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" }
+    "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" },
+    "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" }
   }
 }

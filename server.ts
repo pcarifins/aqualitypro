@@ -201,6 +201,128 @@ async function startServer() {
     res.json({ success: true, message: "Database reset to initial seed data." });
   });
 
+  // AI Troubleshooting Suggestions (Gemini API)
+  app.post("/api/troubleshoot", async (req, res) => {
+    try {
+      const { process, unitModel, component, ngItem, ngDescription } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.json({
+          fallback:
+            `AI ADVISORY ONLY (Key Not Configured):\n` +
+            `• Check mating surfaces, O-rings, and oil seal orientation for damage or pinched rubber.\n` +
+            `• Verify bolt torque values according to Komatsu shop manual specs.\n` +
+            `• Inspect hydraulic hoses, fittings, and quick disconnects for tightness.\n` +
+            `• Verify sensor electrical connectors, ground wires, and harness routing.\n` +
+            `• Re-check pressure relief valve adjustments and oil cleaniness level.`
+        });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are an advisory AI engineering assistant for Komatsu Remanufacturing Asia heavy equipment component quality testing.
+Process Stage: ${process || "Testing"}
+Unit Model: ${unitModel || "Unknown"}
+Component: ${component || "Unknown"}
+NOT GOOD Parameter / Defect: ${ngItem || "General Failure"}
+Operator Remarks: ${ngDescription || "None"}
+
+Provide 3-5 concise, practical, actionable troubleshooting suggestions for heavy machinery mechanics/inspectors regarding this NOT GOOD finding.
+Focus on standard mechanical checks (e.g., O-rings, seals, bolt torques, hose fittings, electrical/sensor connections, pressure relief settings, assembly alignment).
+
+MANDATORY RULES:
+1. Always start with: "AI ADVISORY ONLY: These suggestions are provided as reference guidance and do not replace official Komatsu shop manuals or standard operating procedures (SOP)."
+2. Format as clear bullet points with bold titles.
+3. Keep it brief and directly relevant.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      const text = response.text || "No suggestion generated.";
+      res.json({ suggestion: text });
+    } catch (err: any) {
+      console.warn("AI Troubleshooting error:", err);
+      res.json({
+        fallback:
+          `AI ADVISORY ONLY (System Fallback):\n` +
+          `• Check mating surfaces, O-rings, and oil seal orientation for damage or pinched rubber.\n` +
+          `• Verify bolt torque values according to Komatsu shop manual specs.\n` +
+          `• Inspect hydraulic hoses, fittings, and quick disconnects for tightness.\n` +
+          `• Verify sensor electrical connectors, ground wires, and harness routing.\n` +
+          `• Re-check pressure relief valve adjustments and oil cleaniness level.`
+      });
+    }
+  });
+
+  // AI Performance Summary (Gemini API)
+  app.post("/api/performance-summary", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.json({
+          fallback: `AI Performance analysis is currently unavailable (API Key not configured in panel). Please check your workspace configuration.`
+        });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const metrics = req.body;
+      const prompt = `You are an operations executive AI director at Komatsu Remanufacturing Asia's quality center.
+Analyze this raw monthly performance and testing volume metrics dashboard across our three main component flows: Engine, PT-PPM, and Cylinder.
+
+DASHBOARD DATA METRICS:
+${JSON.stringify(metrics, null, 2)}
+
+Provide a concise, professional operations summary formatted in beautiful Markdown.
+You must use these EXACT headers:
+
+### KEY HIGHLIGHT
+Identify the most remarkable performance milestone, volume spike, or high compliance rate.
+
+### MAIN CONCERN
+Highlight the main bottleneck, long lead times, or highest NG defect rate that demands operational intervention.
+
+### BEST IMPROVING GROUP
+Name the specific component group showing positive cycle time compression or quality improvements.
+
+### GROUP REQUIRING ATTENTION
+Name the specific component group that has stagnated or deteriorated, citing its average lead times or defect counts.
+
+### SUGGESTED FOLLOW-UP
+List 2-3 specific, actionable engineering checks (e.g., tooling checks, checklist reviews, cycle audits) for supervisors to address the bottlenecks.
+
+MANDATORY WRITING DIRECTIVES:
+- Keep the writing extremely high-end, professional, objective, and management-oriented.
+- Do NOT hypothesize or speculate on external causes (e.g. weather, raw material shipping). Frame everything around internal testing station cycle operations and testing pass rates.
+- Do NOT use self-praise or flowery marketing adjectives. Use precise operational verbs like "indicates", "shows", "suggests", or "requires attention".
+- Ensure the output is concise and visually clean.`;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: prompt,
+      });
+
+      res.json({ summary: result.text || "No summary generated." });
+    } catch (err: any) {
+      console.warn("AI Performance summary error:", err);
+      res.json({
+        fallback: `AI Performance Summary Service is currently unavailable. Details: ${err.message || "unknown error"}`
+      });
+    }
+  });
+
   // --- VITE / STATIC SERVING ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

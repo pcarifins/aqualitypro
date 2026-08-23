@@ -31,6 +31,7 @@ import {
 import { formatDateTime,calculateMinutesBetween, } from '../utils/formatters';
 import { filterAssemblersByCompGroup } from '../utils/assemblerFilter';
 import { canUserAccessCompGroup } from '../utils/permissions';
+import { AITroubleshootingCard } from './AITroubleshootingCard';
 
 interface GLTFormProps {
   currentUser: User;
@@ -921,6 +922,15 @@ export const GLTForm: React.FC<GLTFormProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* AI Troubleshooting Suggestion */}
+                <AITroubleshootingCard
+                  process="GLT Inspection"
+                  unitModel={unitModel}
+                  component={component}
+                  ngItem={ngItem}
+                  ngDescription={ngDescription}
+                />
               </div>
             )}
 

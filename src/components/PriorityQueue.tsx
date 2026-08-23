@@ -19,9 +19,15 @@ import {
   Check,
   X,
   History,
+  Gauge,
+  Calendar,
 } from 'lucide-react';
-import { QueueRecord, CompGroup, UserRole, ProductModel } from '../types';
+import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine } from '../types';
 import { apiClient } from '../api/client';
+import { calculateOverallCapacity, calculateScheduleForQueue } from '../utils/capacityCalculator';
+import { CapacityKPICards } from './CapacityKPICards';
+import { TestingLinesCapacitySection } from './TestingLinesCapacitySection';
+import { LineSetupModal } from './LineSetupModal';
 
 interface PriorityQueueProps {
   currentUserRole: UserRole | string;
@@ -39,6 +45,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [selectedCompGroup, setSelectedCompGroup] = useState<CompGroup>('Engine');
   const [queueList, setQueueList] = useState<QueueRecord[]>([]);
   const [productModels, setProductModels] = useState<ProductModel[]>([]);
+  const [testingLines, setTestingLines] = useState<TestingLine[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmittingJO, setIsSubmittingJO] = useState(false);
@@ -49,6 +56,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReorderModal, setShowReorderModal] = useState(false);
   const [showUrgentModal, setShowUrgentModal] = useState(false);
+  const [showLineSetupModal, setShowLineSetupModal] = useState(false);
   const [selectedQueueItem, setSelectedQueueItem] = useState<QueueRecord | null>(null);
   const [targetPriority, setTargetPriority] = useState<number>(1);
   const [reorderRemark, setReorderRemark] = useState('');
@@ -83,10 +91,31 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     setProductModels(models || []);
   };
 
+  const loadTestingLines = async () => {
+    const lines = await apiClient.getTestingLines();
+    setTestingLines(lines || []);
+  };
+
   useEffect(() => {
     loadQueue();
     loadProductModels();
+    loadTestingLines();
   }, []);
+
+  // Compute Overall Capacity & Line Statistics
+  const overallCapacityStats = useMemo(() => {
+    return calculateOverallCapacity(queueList, testingLines);
+  }, [queueList, testingLines]);
+
+  const handleAssignTestingLine = async (queueRecordId: string, testingLineId: string) => {
+    try {
+      const { store } = await import('../data/storageEngine');
+      await store.updateQueueRecord(queueRecordId, { testingLineId });
+      await loadQueue();
+    } catch (err) {
+      console.error('Failed to update testing line assignment:', err);
+    }
+  };
 
   // Filter Product Models by selected Queue / CompGroup
   const eligibleProductModels = useMemo(() => {
@@ -149,6 +178,11 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       if (b.status === 'FINISH' && a.status !== 'FINISH') return -1;
       return a.currentPriority - b.currentPriority;
     });
+
+  // Compute Schedule (Est Start/Finish) for Ranked Queue
+  const scheduledRankedQueue = useMemo(() => {
+    return calculateScheduleForQueue(rankedQueue, testingLines);
+  }, [rankedQueue, testingLines]);
 
   const handleSyncPPC = async () => {
     setIsLoading(true);
@@ -327,15 +361,15 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
         <div>
           <div className="flex items-center space-x-2 text-blue-400 text-xs font-bold uppercase tracking-wider mb-1">
             <ListOrdered className="w-4 h-4 text-blue-400" />
-            <span>Production Planning & Control Priority Management</span>
+            <span>Production Planning & Control</span>
           </div>
           <h2 className="text-xl font-black text-white tracking-tight">
-            Component Testing Priority Queue
+            PRIORITY & CAPACITY
           </h2>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Real-time sequenced testing queue for Engine, Power Train (PT-PPM), and Cylinder.
+            Testing Queue Planning & Capacity Management for Engine, Power Train (PT-PPM), and Cylinder.
             {canReorder
-              ? ' You have authority to adjust priorities and schedule urgent jobs.'
+              ? ' You have authority to adjust priorities, allocate lines, and schedule urgent jobs.'
               : ' Read-only view for testing station operators.'}
           </p>
         </div>
@@ -368,6 +402,16 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
           <span>{syncFeedback}</span>
         </div>
       )}
+
+      {/* TOP KPI CARDS */}
+      <CapacityKPICards stats={overallCapacityStats} />
+
+      {/* TESTING LINES CAPACITY SECTION */}
+      <TestingLinesCapacitySection
+        summaries={overallCapacityStats.lineSummaries}
+        onOpenSetup={() => setShowLineSetupModal(true)}
+        canConfigure={canReorder}
+      />
 
       {/* Component Group Tabs */}
       <div className="flex items-center justify-between flex-wrap gap-3 bg-white border border-slate-200 rounded-2xl p-2 shadow-xs">
@@ -511,27 +555,31 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-            {selectedCompGroup} Active Test Queue ({rankedQueue.length})
+            {selectedCompGroup} Active Test Queue ({scheduledRankedQueue.length})
           </h3>
           <span className="text-[11px] text-slate-400">
-            Ordered by Sequence Priority
+            Ordered by Sequence Priority & Schedule Estimate
           </span>
         </div>
 
-        {rankedQueue.length === 0 ? (
+        {scheduledRankedQueue.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
             No active test jobs in {selectedCompGroup} queue.
           </div>
         ) : (
           <div className="space-y-2.5">
-            {rankedQueue.map((item, idx) => {
+            {scheduledRankedQueue.map((item, idx) => {
               const isOnProcess = item.status === 'ON_PROCESS';
               const isFinish = item.status === 'FINISH';
+
+              const activeLinesForGroup = testingLines.filter(
+                (l) => l.active && (l.componentGroup === selectedCompGroup || !l.componentGroup)
+              );
 
               return (
                 <div
                   key={item.queueRecordId}
-                  className={`bg-white border rounded-2xl p-4 transition-all shadow-xs hover:border-slate-300 flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
+                  className={`bg-white border rounded-2xl p-4 transition-all shadow-xs hover:border-slate-300 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 ${
                     isOnProcess
                       ? 'border-amber-400 bg-amber-50/20'
                       : isFinish
@@ -539,7 +587,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                       : 'border-slate-200'
                   }`}
                 >
-                  <div className="flex items-start md:items-center space-x-3.5">
+                  <div className="flex items-start md:items-center space-x-3.5 flex-1 min-w-0">
                     {/* Priority Badge */}
                     <div
                       className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center font-black shrink-0 ${
@@ -563,7 +611,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                     </div>
 
                     {/* Main Details */}
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5 mb-1">
                         <span
                           className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
@@ -594,7 +642,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                         )}
                       </div>
 
-                      <div className="text-sm font-black text-slate-900">
+                      <div className="text-sm font-black text-slate-900 truncate">
                         {item.unitModel} — {item.component}
                       </div>
 
@@ -604,11 +652,48 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                         {item.partNumber && <span>P/N: <strong className="font-mono text-slate-700">{item.partNumber}</strong></span>}
                         {item.serialNumber && <span>S/N: <strong className="font-mono text-slate-700">{item.serialNumber}</strong></span>}
                       </div>
+
+                      {/* Line Assignment & Schedule Timings */}
+                      <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                        {/* Testing Line Selector */}
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Line:</span>
+                          {canReorder && !isOnProcess && !isFinish ? (
+                            <select
+                              value={item.testingLineId || ''}
+                              onChange={(e) => handleAssignTestingLine(item.queueRecordId, e.target.value)}
+                              className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="">Auto Line Allocation</option>
+                              {activeLinesForGroup.map((line) => (
+                                <option key={line.id} value={line.id}>
+                                  {line.name} ({line.process})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded text-[11px]">
+                              {item.assignedLineName}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Estimated Timings */}
+                        {!isFinish && (
+                          <div className="flex items-center space-x-3 text-[11px] font-mono text-slate-600 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
+                            <span>Duration: <strong className="text-slate-900">{item.estimatedDurationHours}h</strong></span>
+                            <span className="text-slate-300">|</span>
+                            <span>Est Start: <strong className="text-blue-700">{item.estimatedStartTime}</strong></span>
+                            <span className="text-slate-300">|</span>
+                            <span>Est Finish: <strong className="text-purple-700">{item.estimatedFinishTime}</strong></span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   {/* Right Actions & Sequence Controls */}
-                  <div className="flex items-center justify-between md:justify-end gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
+                  <div className="flex items-center justify-between lg:justify-end gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
                     {/* Up/Down Reorder Controls (PPC / Supervisor / Admin only) */}
                     {canReorder && !item.priorityLocked && !isOnProcess && !isFinish && (
                       <div className="flex items-center space-x-1 mr-1">
@@ -1086,6 +1171,16 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* LINE CAPACITY SETUP MODAL */}
+      {showLineSetupModal && (
+        <LineSetupModal
+          lines={testingLines}
+          onClose={() => setShowLineSetupModal(false)}
+          onRefresh={loadTestingLines}
+          currentUserName={currentUserName}
+        />
       )}
     </div>
   );

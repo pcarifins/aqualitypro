@@ -7,12 +7,14 @@ import {
   History,
   BarChart3,
   Settings,
+  Tv,
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { getUserPermissions } from '../utils/permissions';
 
 export type TabType =
   | 'home'
+  | 'live'
   | 'glt'
   | 'dyno'
   | 'hydraulic'
@@ -37,33 +39,66 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   const roleUpper = (userRole || '').toUpperCase();
   const isAdmin = roleUpper === 'ADMIN' || userRole === 'administrator';
   const isPPC = roleUpper === 'PPC';
+  const isOperator =
+    roleUpper === 'GLT_OPT' ||
+    roleUpper === 'DYNO_OPT' ||
+    roleUpper === 'TESTBENCH_OPT' ||
+    roleUpper === 'OPERATOR' ||
+    userRole === 'operator' ||
+    roleUpper.includes('OPERATOR') ||
+    roleUpper.includes('OPT');
+
+  const isSupervisor = roleUpper === 'SUPERVISOR' || userRole === 'supervisor';
+  const isQC = roleUpper === 'QC';
+  const isGLTOpt = roleUpper === 'GLT_OPT';
+  const isDynoOpt = roleUpper === 'DYNO_OPT';
+  const isTestbenchOpt = roleUpper === 'TESTBENCH_OPT';
 
   const tabs: { id: TabType; label: string; icon: any }[] = [];
 
-  if (permissions.canManageMasterData && isAdmin) {
-    tabs.push({ id: 'admin', label: 'Master Data', icon: Settings });
-  }
-
-  tabs.push({ id: 'home', label: isPPC || isAdmin ? 'Queue' : 'Home', icon: Home });
-
-  if (permissions.canExecuteGLT && !isPPC) {
-    tabs.push({ id: 'glt', label: 'GLT', icon: ClipboardCheck });
-  }
-
-  if (permissions.canExecuteDynotest && !isPPC) {
-    tabs.push({ id: 'dyno', label: 'Dynotest', icon: Gauge });
-  }
-
-  if (permissions.canExecuteTestbench && !isPPC) {
-    tabs.push({ id: 'hydraulic', label: 'Testbench', icon: Activity });
-  }
-
-  if (permissions.canViewHistory) {
+  if (isSupervisor) {
+    tabs.push({ id: 'home', label: 'Queue', icon: Home });
+    tabs.push({ id: 'live', label: 'Live Monitor', icon: Tv });
+    tabs.push({ id: 'dashboard', label: 'Performance', icon: BarChart3 });
     tabs.push({ id: 'history', label: 'History', icon: History });
-  }
-
-  if (permissions.canViewAnalytics) {
-    tabs.push({ id: 'dashboard', label: isPPC ? 'Dashboard' : 'Analytics', icon: BarChart3 });
+    tabs.push({ id: 'admin', label: 'Settings & Logs', icon: Settings });
+  } else if (isPPC) {
+    tabs.push({ id: 'home', label: 'Queue', icon: Home });
+    tabs.push({ id: 'live', label: 'Live Monitor', icon: Tv });
+  } else if (isGLTOpt) {
+    tabs.push({ id: 'glt', label: 'GLT', icon: ClipboardCheck });
+  } else if (isDynoOpt) {
+    tabs.push({ id: 'dyno', label: 'Dynotest', icon: Gauge });
+  } else if (isTestbenchOpt) {
+    tabs.push({ id: 'hydraulic', label: 'Testbench', icon: Activity });
+  } else if (isAdmin) {
+    tabs.push({ id: 'home', label: 'Queue', icon: Home });
+    tabs.push({ id: 'live', label: 'Live Monitor', icon: Tv });
+    tabs.push({ id: 'dashboard', label: 'Performance', icon: BarChart3 });
+    tabs.push({ id: 'history', label: 'History', icon: History });
+    tabs.push({ id: 'admin', label: 'Admin', icon: Settings });
+    tabs.push({ id: 'glt', label: 'GLT', icon: ClipboardCheck });
+    tabs.push({ id: 'dyno', label: 'Dyno', icon: Gauge });
+    tabs.push({ id: 'hydraulic', label: 'Testbench', icon: Activity });
+  } else if (isQC) {
+    tabs.push({ id: 'home', label: 'Queue', icon: Home });
+    tabs.push({ id: 'live', label: 'Live Monitor', icon: Tv });
+    tabs.push({ id: 'dashboard', label: 'Performance', icon: BarChart3 });
+    tabs.push({ id: 'history', label: 'History', icon: History });
+  } else if (isOperator) {
+    if (permissions.canExecuteGLT) tabs.push({ id: 'glt', label: 'GLT', icon: ClipboardCheck });
+    if (permissions.canExecuteDynotest) tabs.push({ id: 'dyno', label: 'Dyno', icon: Gauge });
+    if (permissions.canExecuteTestbench) tabs.push({ id: 'hydraulic', label: 'Testbench', icon: Activity });
+    if (permissions.canViewHistory) tabs.push({ id: 'history', label: 'History', icon: History });
+  } else {
+    tabs.push({ id: 'home', label: 'Queue', icon: Home });
+    tabs.push({ id: 'live', label: 'Live Monitor', icon: Tv });
+    if (permissions.canExecuteGLT) tabs.push({ id: 'glt', label: 'GLT', icon: ClipboardCheck });
+    if (permissions.canExecuteDynotest) tabs.push({ id: 'dyno', label: 'Dynotest', icon: Gauge });
+    if (permissions.canExecuteTestbench) tabs.push({ id: 'hydraulic', label: 'Testbench', icon: Activity });
+    if (permissions.canViewHistory) tabs.push({ id: 'history', label: 'History', icon: History });
+    if (permissions.canViewAnalytics) tabs.push({ id: 'dashboard', label: 'Performance', icon: BarChart3 });
+    if (permissions.canManageMasterData) tabs.push({ id: 'admin', label: 'Settings', icon: Settings });
   }
 
   return (
