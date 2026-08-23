@@ -192,11 +192,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
         {/* Floating Minimalist Info Plate */}
         <div className="absolute bottom-12 left-12 max-w-md bg-slate-900/90 backdrop-blur-md border border-slate-800 p-6 rounded-2xl space-y-3 shadow-2xl text-white">
-          <span className="inline-flex items-center space-x-1.5 bg-blue-500/20 border border-blue-400/20 px-3 py-1 rounded-full text-blue-400 text-[10px] font-black uppercase tracking-wider">
-            <span>Attachment 2: Dynotest & Checksheet Suite</span>
-          </span>
           <h3 className="text-lg font-serif tracking-tight text-white leading-snug">
-            Heavy-Duty Engine Performance & Hydraulic System Verification
+            Quality Engine & Hydraulic Performance Testing System
           </h3>
           <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
             Strictly synchronized in real-time. Calibrated to rigorous standards, processing automatic quality checks, AI trouble diagnostics, and SharePoint integrations.
