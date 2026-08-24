@@ -46,8 +46,7 @@ import {
   logAuditEvent,
   initializeAndMigrateFirestore,
   sanitizeFirestoreValue,
-  ensureRequiredUsers,
-} from '../lib/firestoreSync'
+} from '../lib/firestoreSync';
 
 const STORAGE_KEYS = {
   USERS: 'aquality_users_v2',
@@ -120,23 +119,7 @@ class DataStore {
     this.isInitialized = true;
 
     // 1. One-time migration if needed
-    try {
-      await initializeAndMigrateFirestore();
-    } catch (error) {
-      console.error(
-        '[Firestore] Migration initialization failed:',
-        error
-      );
-    }
-
-    try {
-      await ensureRequiredUsers();
-    } catch (error) {
-      console.error(
-        '[User Recovery] Failed to verify required users:',
-        error
-      );
-    }
+    await initializeAndMigrateFirestore();
 
     // 2. Set up realtime listeners for all collections
     const unSubUsers = subscribeToCollection<User>('users', (data) => {

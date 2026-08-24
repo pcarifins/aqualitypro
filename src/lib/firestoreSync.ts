@@ -112,48 +112,6 @@ export function subscribeToCollection<T>(
   );
 }
 
-export async function ensureRequiredUsers(): Promise<{
-  created: number;
-  existing: number;
-}> {
-  const snapshot = await getDocs(collection(db, 'users'));
-
-  const existingIds = new Set(
-    snapshot.docs.map((docSnap) => docSnap.id)
-  );
-
-  let created = 0;
-
-  for (const seedUser of initialUsers) {
-    if (existingIds.has(seedUser.id)) {
-      continue;
-    }
-
-    const cleanUser = sanitizeFirestoreValue(seedUser);
-
-    await setDoc(
-      doc(db, 'users', seedUser.id),
-      cleanUser
-    );
-
-    created++;
-
-    console.info(
-      `[User Recovery] Missing user restored: ${seedUser.id}`
-    );
-  }
-
-  console.info(
-    `[User Recovery] Verification completed. ` +
-    `Existing: ${existingIds.size}, Created: ${created}`
-  );
-
-  return {
-    created,
-    existing: existingIds.size,
-  };
-}
-
 export async function testFirestoreConnection(): Promise<{
   connected: boolean;
   message: string;
