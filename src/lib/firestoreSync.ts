@@ -96,25 +96,20 @@ export function subscribeToCollection<T>(
   callback: (data: T[]) => void,
   onError?: (err: Error) => void
 ) {
-  try {
-    return onSnapshot(
-      collection(db, collectionName),
-      (snapshot) => {
-        const items: T[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as T);
-        });
-        callback(items);
-      },
-      (error) => {
-        console.warn(`Firestore subscription offline/unavailable for ${collectionName}:`, error?.message || error);
-        if (onError) onError(error);
-      }
-    );
-  } catch (err: any) {
-    console.warn(`Failed to initialize snapshot for ${collectionName}:`, err?.message || err);
-    return () => {};
-  }
+  return onSnapshot(
+    collection(db, collectionName),
+    (snapshot) => {
+      const items: T[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as T);
+      });
+      callback(items);
+    },
+    (error) => {
+      console.error(`Error subscribing to ${collectionName}:`, error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 export async function testFirestoreConnection(): Promise<{
@@ -292,10 +287,10 @@ export async function initializeAndMigrateFirestore(): Promise<{
       message: 'Database migration to Cloud Firestore successfully completed.',
     };
   } catch (error: any) {
-    console.warn('Migration to Firestore skipped/offline (using local fallback cache):', error?.message || error);
+    console.error('Migration to Firestore failed:', error);
     return {
       migrated: false,
-      message: `Offline mode active: ${error?.message || 'Using local cache'}`,
+      message: `Migration failed: ${error?.message || 'Unknown error'}`,
     };
   }
 }

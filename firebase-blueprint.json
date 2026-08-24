@@ -214,8 +214,6 @@
     "auditLogs": { "schema": "AuditLog", "description": "Audit log records collection" },
     "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" },
     "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" },
-    "testOverrides": { "schema": "TestOverride", "description": "Test duration overrides collection" },
-    "sharepointWorkbook": { "schema": "SystemConfig", "description": "Simulated SharePoint workbook rows collection" },
-    "sharepointSyncLogs": { "schema": "SystemConfig", "description": "SharePoint synchronization log records" }
+    "testOverrides": { "schema": "TestOverride", "description": "Test duration overrides collection" }
   }
 }

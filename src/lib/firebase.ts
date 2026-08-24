@@ -3,14 +3,11 @@ import {
   initializeFirestore,
   getFirestore,
   memoryLocalCache,
-  setLogLevel,
 } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export { firebaseConfig };
-
-setLogLevel('error');
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 

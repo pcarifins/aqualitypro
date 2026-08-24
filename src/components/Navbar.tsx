@@ -100,6 +100,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
+            {/* Google Sheets Sync Modal Trigger */}
+            {onOpenSheetsModal && (
+              <button
+                onClick={onOpenSheetsModal}
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-200 text-xs font-semibold shadow-2xs transition-all"
+                title="Google Sheets Sync"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden md:inline text-[11px]">Sheets</span>
+              </button>
+            )}
+
             {/* User Profile Card Button */}
             <button
               onClick={() => setShowAccountModal(true)}
