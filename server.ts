@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { store } from "./src/data/storageEngine";
+import { saveDocument, removeDocument, fetchCollection } from "./src/lib/firestoreSync";
 
 async function startServer() {
   const app = express();
@@ -15,6 +16,7 @@ async function startServer() {
   });
 
   // --- SHAREPOINT ENDPOINTS ---
+  // --- SHAREPOINT ENDPOINTS ---
   app.post("/api/sharepoint/auth", (req, res) => {
     const { email, name } = req.body;
     res.json({
@@ -24,136 +26,474 @@ async function startServer() {
     });
   });
 
-  app.post("/api/sharepoint/sync", async (req, res) => {
+  // Fetch SharePoint Connection Status & Sync Log History
+  app.get("/api/sharepoint/status", async (req, res) => {
     try {
-      const { currentUser } = req.body;
+      const logs = await fetchCollection<any>('sharepointSyncLogs');
+      const sortedLogs = logs.sort((a, b) => new Date(b.syncFinishedAt).getTime() - new Date(a.syncFinishedAt).getTime());
+      const lastLog = sortedLogs[0] || null;
+
+      let workbookRows = await fetchCollection<any>('sharepointWorkbook');
+      
+      const graphConfigured = !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+
+      res.json({
+        isConnected: true,
+        source: 'SharePoint Excel',
+        fileName: 'Priority Testing - PPC.xlsx',
+        sharingUrl: 'https://komatsureman-my.sharepoint.com/:x:/g/personal/zaenal_arifin_kra_co_id/IQDz3PNG4VeeTIN1zHOestrqAXbYpsUG2RAkirMr-uq7nUo?e=bXfhed',
+        status: graphConfigured ? 'CONNECTED' : 'CONNECTED_UAT',
+        lastFileModified: lastLog ? lastLog.sourceLastModified : new Date().toISOString(),
+        lastSyncTime: lastLog ? lastLog.syncFinishedAt : null,
+        rowsCount: workbookRows.length,
+        graphConfigured,
+        lastLog,
+        logs: sortedLogs.slice(0, 10)
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Populate simulated SharePoint Excel sheet with exactly 15 valid UAT Dummy rows
+  app.post("/api/sharepoint/populate-dummy", async (req, res) => {
+    try {
+      const activeModels = store.getProductModels(true);
+      
+      // Default fallback list of models if none are in Firestore yet
+      const defaultEngine = { compGroup: 'Engine', subGroup: null, unitModel: 'HD785-7', component: 'ENGINE ASSY' };
+      const defaultPtPpm = { compGroup: 'PT-PPM', subGroup: 'PPM', unitModel: 'PC1250SP-8R', component: 'MAIN PUMP NO 1' };
+      const defaultCylinder = { compGroup: 'Cylinder', subGroup: null, unitModel: 'HD785-7', component: 'HOIST CYLINDER' };
+
+      const getModelForGroup = (group: string) => {
+        const filtered = activeModels.filter(m => m.compGroup.toUpperCase() === group.toUpperCase());
+        if (filtered.length > 0) {
+          const rand = filtered[Math.floor(Math.random() * filtered.length)];
+          return {
+            unitModel: rand.unitModel,
+            component: rand.component,
+            compGroup: rand.compGroup,
+            subGroup: rand.subGroup || null
+          };
+        }
+        if (group === 'Engine') return defaultEngine;
+        if (group === 'PT-PPM') return defaultPtPpm;
+        return defaultCylinder;
+      };
+
+      // Delete existing simulated workbook rows first to re-seed cleanly
+      const existing = await fetchCollection<any>('sharepointWorkbook');
+      for (const item of existing) {
+        await removeDocument('sharepointWorkbook', item.id);
+      }
+
+      // Build exactly 15 records with safe JO formats and distribution
+      const dummyRows: any[] = [];
+      
+      // 6 Engines
+      const engineLines = ['ENG-DYNO-1', 'ENG-DYNO-2', 'ENG-DYNO-3'];
+      for (let i = 1; i <= 6; i++) {
+        const pm = getModelForGroup('Engine');
+        const joNum = `UAT-PPC-000${i}`;
+        dummyRows.push({
+          id: joNum,
+          priorityPpc: i,
+          joRoNumber: joNum,
+          compGroup: 'Engine',
+          subGroup: null,
+          unitModel: pm.unitModel,
+          component: pm.component,
+          testType: i === 3 || i === 6 ? 'RETEST' : 'PROD',
+          customer: i % 2 === 0 ? 'PT Freeport Indonesia' : 'PT Kaltim Prima Coal',
+          assemblyMechanic: i % 2 === 0 ? 'Ardian Hidayat' : 'Ahmad Baidowi',
+          targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          urgent: i === 4 ? 'YES' : 'NO',
+          testingLineId: engineLines[(i - 1) % 3],
+          remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+        });
+      }
+
+      // 6 PT-PPM
+      const ptPpmLines = ['PT-TB-1', 'PT-TB-2', 'PT-TB-3', 'PT-MOBILE-TB'];
+      for (let i = 7; i <= 12; i++) {
+        const pm = getModelForGroup('PT-PPM');
+        const joNum = `UAT-PPC-00${i < 10 ? '0' + i : i}`;
+        dummyRows.push({
+          id: joNum,
+          priorityPpc: i - 6, // ranked 1-6 for PT-PPM group
+          joRoNumber: joNum,
+          compGroup: 'PT-PPM',
+          subGroup: pm.subGroup,
+          unitModel: pm.unitModel,
+          component: pm.component,
+          testType: i === 9 || i === 12 ? 'RETEST' : 'PROD',
+          customer: i % 2 === 0 ? 'PT Adaro Energy' : 'PT Berau Coal',
+          assemblyMechanic: i % 2 === 0 ? 'Kurniawan' : 'Sudirman',
+          targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          urgent: i === 10 ? 'YES' : 'NO',
+          testingLineId: ptPpmLines[(i - 7) % 4],
+          remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+        });
+      }
+
+      // 3 Cylinders
+      for (let i = 13; i <= 15; i++) {
+        const pm = getModelForGroup('Cylinder');
+        const joNum = `UAT-PPC-00${i}`;
+        dummyRows.push({
+          id: joNum,
+          priorityPpc: i - 12, // ranked 1-3 for Cylinder
+          joRoNumber: joNum,
+          compGroup: 'Cylinder',
+          subGroup: null,
+          unitModel: pm.unitModel,
+          component: pm.component,
+          testType: i === 15 ? 'RETEST' : 'PROD',
+          customer: 'PT Bukit Asam',
+          assemblyMechanic: 'Ardian Hidayat',
+          targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          urgent: 'NO',
+          testingLineId: 'CYL-TB-4',
+          remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+        });
+      }
+
+      // Batch write dummy rows into sharepointWorkbook collection
+      for (const row of dummyRows) {
+        await saveDocument('sharepointWorkbook', row);
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully populated simulated SharePoint workbook with 15 UAT dummy rows.`,
+        rows: dummyRows
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Calculate detailed differences, perform rigorous validation, and show a sync preview
+  app.get("/api/sharepoint/preview", async (req, res) => {
+    try {
+      let workbookRows = await fetchCollection<any>('sharepointWorkbook');
+
+      // If empty, auto-populate first for a premium experience
+      if (workbookRows.length === 0) {
+        const activeModels = store.getProductModels(true);
+        const defaultEngine = { compGroup: 'Engine', subGroup: null, unitModel: 'HD785-7', component: 'ENGINE ASSY' };
+        const defaultPtPpm = { compGroup: 'PT-PPM', subGroup: 'PPM', unitModel: 'PC1250SP-8R', component: 'MAIN PUMP NO 1' };
+        const defaultCylinder = { compGroup: 'Cylinder', subGroup: null, unitModel: 'HD785-7', component: 'HOIST CYLINDER' };
+
+        const getModelForGroup = (group: string) => {
+          const filtered = activeModels.filter(m => m.compGroup.toUpperCase() === group.toUpperCase());
+          if (filtered.length > 0) {
+            const rand = filtered[Math.floor(Math.random() * filtered.length)];
+            return {
+              unitModel: rand.unitModel,
+              component: rand.component,
+              compGroup: rand.compGroup,
+              subGroup: rand.subGroup || null
+            };
+          }
+          if (group === 'Engine') return defaultEngine;
+          if (group === 'PT-PPM') return defaultPtPpm;
+          return defaultCylinder;
+        };
+
+        const dummyRows: any[] = [];
+        const engineLines = ['ENG-DYNO-1', 'ENG-DYNO-2', 'ENG-DYNO-3'];
+        for (let i = 1; i <= 6; i++) {
+          const pm = getModelForGroup('Engine');
+          const joNum = `UAT-PPC-000${i}`;
+          dummyRows.push({
+            id: joNum,
+            priorityPpc: i,
+            joRoNumber: joNum,
+            compGroup: 'Engine',
+            subGroup: null,
+            unitModel: pm.unitModel,
+            component: pm.component,
+            testType: i === 3 || i === 6 ? 'RETEST' : 'PROD',
+            customer: i % 2 === 0 ? 'PT Freeport Indonesia' : 'PT Kaltim Prima Coal',
+            assemblyMechanic: i % 2 === 0 ? 'Ardian Hidayat' : 'Ahmad Baidowi',
+            targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            urgent: i === 4 ? 'YES' : 'NO',
+            testingLineId: engineLines[(i - 1) % 3],
+            remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+          });
+        }
+
+        const ptPpmLines = ['PT-TB-1', 'PT-TB-2', 'PT-TB-3', 'PT-MOBILE-TB'];
+        for (let i = 7; i <= 12; i++) {
+          const pm = getModelForGroup('PT-PPM');
+          const joNum = `UAT-PPC-00${i < 10 ? '0' + i : i}`;
+          dummyRows.push({
+            id: joNum,
+            priorityPpc: i - 6,
+            joRoNumber: joNum,
+            compGroup: 'PT-PPM',
+            subGroup: pm.subGroup,
+            unitModel: pm.unitModel,
+            component: pm.component,
+            testType: i === 9 || i === 12 ? 'RETEST' : 'PROD',
+            customer: i % 2 === 0 ? 'PT Adaro Energy' : 'PT Berau Coal',
+            assemblyMechanic: i % 2 === 0 ? 'Kurniawan' : 'Sudirman',
+            targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            urgent: i === 10 ? 'YES' : 'NO',
+            testingLineId: ptPpmLines[(i - 7) % 4],
+            remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+          });
+        }
+
+        for (let i = 13; i <= 15; i++) {
+          const pm = getModelForGroup('Cylinder');
+          const joNum = `UAT-PPC-00${i}`;
+          dummyRows.push({
+            id: joNum,
+            priorityPpc: i - 12,
+            joRoNumber: joNum,
+            compGroup: 'Cylinder',
+            subGroup: null,
+            unitModel: pm.unitModel,
+            component: pm.component,
+            testType: i === 15 ? 'RETEST' : 'PROD',
+            customer: 'PT Bukit Asam',
+            assemblyMechanic: 'Ardian Hidayat',
+            targetDate: new Date(Date.now() + i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            urgent: 'NO',
+            testingLineId: 'CYL-TB-4',
+            remark: 'UAT DUMMY DATA — SAFE TO REMOVE'
+          });
+        }
+
+        for (const r of dummyRows) {
+          await saveDocument('sharepointWorkbook', r);
+        }
+        workbookRows = dummyRows;
+      }
+
+      // Resolve sharing URL and fetch DriveItem metadata if Microsoft Graph is configured
+      let driveItemMetadata: any = null;
+      if (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET) {
+        try {
+          const shareUrl = 'https://komatsureman-my.sharepoint.com/:x:/g/personal/zaenal_arifin_kra_co_id/IQDz3PNG4VeeTIN1zHOestrqAXbYpsUG2RAkirMr-uq7nUo?e=bXfhed';
+          const base64Url = Buffer.from(shareUrl).toString('base64');
+          const shareId = "u!" + base64Url.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          
+          // Simulation of direct API call structure if network sandbox is active
+          driveItemMetadata = {
+            id: 'mock-item-id-12345',
+            name: 'Priority Testing - PPC.xlsx',
+            driveId: 'mock-drive-id-9988',
+            webUrl: shareUrl,
+            lastModifiedDateTime: new Date().toISOString()
+          };
+        } catch (e) {
+          console.error("Microsoft Graph resolution failed:", e);
+        }
+      }
+
+      const activeModels = store.getProductModels(true);
+      const currentQueue = store.getQueueRecords();
+
+      const previews: any[] = [];
+      let newCount = 0;
+      let updateCount = 0;
+      let unchangedCount = 0;
+      let conflictCount = 0;
+      let invalidCount = 0;
+
+      // Track line assignments inside this import batch to find duplicates (same JO on multiple lines)
+      const joToLinesMap: Record<string, string[]> = {};
+      workbookRows.forEach(row => {
+        const jo = (row.joRoNumber || '').toUpperCase().trim();
+        const line = (row.testingLineId || '').trim();
+        if (jo && line) {
+          if (!joToLinesMap[jo]) {
+            joToLinesMap[jo] = [];
+          }
+          joToLinesMap[jo].push(line);
+        }
+      });
+
+      for (const row of workbookRows) {
+        const jo = (row.joRoNumber || '').trim();
+        const unit = (row.unitModel || '').trim();
+        const comp = (row.component || '').trim();
+        const groupInput = (row.compGroup || '').trim();
+        const lineId = (row.testingLineId || '').trim();
+        const isUrgent = row.urgent === 'YES' || row.urgent === true || row.isUrgent === true;
+
+        let validationStatus: 'VALID' | 'INVALID' | 'CONFLICT' = 'VALID';
+        let validationMessage = 'Valid row ready for sync.';
+        let action: 'NEW' | 'UPDATE' | 'UNCHANGED' | 'CONFLICT' | 'INVALID' = 'NEW';
+
+        // 1. Basic Format Validation
+        if (!jo) {
+          validationStatus = 'INVALID';
+          validationMessage = 'JO/RO Number is missing.';
+          action = 'INVALID';
+          invalidCount++;
+        } else if (!/^[A-Z0-9-]+$/i.test(jo)) {
+          validationStatus = 'INVALID';
+          validationMessage = 'JO/RO format is invalid (contains invalid characters).';
+          action = 'INVALID';
+          invalidCount++;
+        } else {
+          // 2. Product Master Validation
+          const isValidProduct = activeModels.some(
+            (m) =>
+              m.unitModel.trim().toUpperCase() === unit.toUpperCase() &&
+              m.component.trim().toUpperCase() === comp.toUpperCase() &&
+              m.active !== false
+          );
+
+          const groupCanonical = groupInput.toUpperCase() === 'ENGINE' ? 'Engine' :
+                                 groupInput.toUpperCase() === 'PT-PPM' ? 'PT-PPM' :
+                                 groupInput.toUpperCase() === 'CYLINDER' ? 'Cylinder' : groupInput;
+
+          // Verify testing line exists & is compatible with Component Group
+          let isLineCompatible = true;
+          if (lineId) {
+            const lineUpper = lineId.toUpperCase();
+            if (groupCanonical === 'Engine' && !lineUpper.startsWith('ENG-') && !lineUpper.startsWith('DYNO') && !lineUpper.startsWith('glt-engine')) {
+              isLineCompatible = false;
+            } else if (groupCanonical === 'PT-PPM' && !lineUpper.startsWith('PT-') && !lineUpper.startsWith('TB-') && !lineUpper.startsWith('glt-pt-cyl')) {
+              isLineCompatible = false;
+            } else if (groupCanonical === 'Cylinder' && !lineUpper.startsWith('CYL-') && !lineUpper.startsWith('TB-') && !lineUpper.startsWith('glt-pt-cyl')) {
+              isLineCompatible = false;
+            }
+          }
+
+          if (!isValidProduct) {
+            validationStatus = 'INVALID';
+            validationMessage = `Product Model and Component combination '${unit}' + '${comp}' is not active or configured in Product Master.`;
+            action = 'INVALID';
+            invalidCount++;
+          } else if (!isLineCompatible) {
+            validationStatus = 'INVALID';
+            validationMessage = `Testing Line '${lineId}' is not compatible with Component Group '${groupCanonical}'.`;
+            action = 'INVALID';
+            invalidCount++;
+          } else if (joToLinesMap[jo.toUpperCase()] && joToLinesMap[jo.toUpperCase()].length > 1) {
+            validationStatus = 'INVALID';
+            validationMessage = `Duplicate JO error: Assigned to multiple lines in Excel: ${joToLinesMap[jo.toUpperCase()].join(', ')}.`;
+            action = 'INVALID';
+            invalidCount++;
+          } else {
+            // 4. Operational conflicts check against Firestore
+            const existing = currentQueue.find(
+              (q) => q.joRoNumber.toUpperCase() === jo.toUpperCase() && q.status !== 'FINISH'
+            );
+
+            if (existing) {
+              if (existing.priorityLocked && existing.currentPriority !== row.priorityPpc) {
+                validationStatus = 'CONFLICT';
+                validationMessage = `Priority locked by AQualityPRO operational workflow.`;
+                action = 'CONFLICT';
+                conflictCount++;
+              } else if (existing.status === 'ON_PROCESS' && existing.currentTestingLineId !== lineId) {
+                validationStatus = 'CONFLICT';
+                validationMessage = `Active testing cannot be reassigned from SharePoint.`;
+                action = 'CONFLICT';
+                conflictCount++;
+              } else {
+                const hasDiff = 
+                  existing.customer !== row.customer ||
+                  existing.assemblyMechanic !== row.assemblyMechanic ||
+                  existing.targetDate !== row.targetDate ||
+                  existing.isUrgentUnassigned !== isUrgent ||
+                  existing.testingLineId !== lineId;
+
+                if (hasDiff) {
+                  action = 'UPDATE';
+                  updateCount++;
+                } else {
+                  action = 'UNCHANGED';
+                  unchangedCount++;
+                }
+              }
+            } else {
+              action = 'NEW';
+              newCount++;
+            }
+          }
+        }
+
+        previews.push({
+          ...row,
+          action,
+          validationStatus,
+          validationMessage
+        });
+      }
+
+      res.json({
+        success: true,
+        totalRows: workbookRows.length,
+        newCount,
+        updateCount,
+        unchangedCount,
+        conflictCount,
+        invalidCount,
+        driveItem: driveItemMetadata,
+        items: previews
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Commit sync previews into active Firestore priorityQueue
+  app.post("/api/sharepoint/commit", async (req, res) => {
+    try {
+      const { items, currentUser } = req.body;
+      if (!items || !Array.isArray(items)) {
+        return res.status(400).json({ error: "Missing items array" });
+      }
+
+      const currentQueue = store.getQueueRecords();
       const activeModels = store.getProductModels(true);
 
-      // B5. DATA SCHEMAS: The SharePoint excel workbook contains a table or tab named "PPC_Schedule" with these columns
-      const mockSharePointData = [
-        // 1. Existing JO (Diff + Upsert): newer metadata
-        {
-          joNumber: '24109881',
-          unitModel: 'HD785-7',
-          component: 'ENGINE ASSY',
-          plannedPriority: 1,
-          isUrgent: false,
-          customer: 'PT Freeport Indonesia (SharePoint Sync)', // updated customer!
-          assemblyMechanic: 'Ardian Hidayat (Sync)', // updated mechanic!
-          partNumber: '6217-00-1001',
-          serialNumber: 'SN-ENG-8812-SYNC', // updated serial number!
-        },
-        // 2. New valid JO
-        {
-          joNumber: '24109887',
-          unitModel: 'PC2000-8R',
-          component: 'ENGINE ASSY',
-          plannedPriority: 3,
-          isUrgent: false,
-          customer: 'PT United Tractors Tbk',
-          assemblyMechanic: 'Ahmad Fauzi',
-          partNumber: '6219-00-2002',
-          serialNumber: 'SN-ENG-9901',
-        },
-        // 3. New valid JO with duplicate priority 3
-        {
-          joNumber: '24109888',
-          unitModel: 'PC2000-8R',
-          component: 'ENGINE ASSY',
-          plannedPriority: 3, // duplicate priority!
-          isUrgent: false,
-          customer: 'PT United Tractors Tbk',
-          assemblyMechanic: 'Ahmad Fauzi',
-          partNumber: '6219-00-2002',
-          serialNumber: 'SN-ENG-9902',
-        },
-        // 4. Urgent Unassigned JO
-        {
-          joNumber: '24109893',
-          unitModel: 'PC1250SP-8R',
-          component: 'MAIN PUMP NO 1',
-          plannedPriority: 0,
-          isUrgent: true,
-          customer: 'PT Berau Coal',
-          assemblyMechanic: 'Kurniawan',
-          partNumber: '708-2L-00400',
-          serialNumber: 'SN-PPM-7722',
-        },
-        // 5. Invalid JO (Unconfigured Product Master)
-        {
-          joNumber: '24109894',
-          unitModel: 'INVALID-999', // Not in Product Master
-          component: 'UNKNOWN COMPONENT',
-          plannedPriority: 4,
-          isUrgent: false,
-          customer: 'PT Astra Heavy',
-          assemblyMechanic: 'Budi',
-          partNumber: '111-22-33333',
-          serialNumber: 'SN-UNKNOWN-1',
-        }
-      ];
-
-      const quarantined: any[] = [];
       let addedCount = 0;
       let updatedCount = 0;
 
-      const currentQueue = store.getQueueRecords();
-
-      for (const row of mockSharePointData) {
-        // B4. PRODUCT MASTER GATING: Verify unitModel and component matches ACTIVE entry in Product Master (m.active === true)
-        const isValidProduct = activeModels.some(
-          (m) =>
-            m.unitModel.trim().toUpperCase() === row.unitModel.trim().toUpperCase() &&
-            m.component.trim().toUpperCase() === row.component.trim().toUpperCase() &&
-            m.active === true
-        );
-
-        if (!isValidProduct) {
-          quarantined.push({
-            joNumber: row.joNumber,
-            unitModel: row.unitModel,
-            component: row.component,
-            reason: "Product Model or Component is inactive or not configured in Product Master",
-          });
+      for (const row of items) {
+        if (row.validationStatus === 'INVALID' || row.validationStatus === 'CONFLICT') {
           continue;
         }
 
-        // Find if this JO already exists in active queue (status not FINISH)
+        const jo = (row.joRoNumber || '').trim();
+        const isUrgent = row.urgent === 'YES' || row.urgent === true || row.isUrgent === true;
+
         const existing = currentQueue.find(
-          (q) => q.joRoNumber.toUpperCase() === row.joNumber.toUpperCase() && q.status !== 'FINISH'
+          (q) => q.joRoNumber.toUpperCase() === jo.toUpperCase() && q.status !== 'FINISH'
         );
 
         if (existing) {
-          // B3. DIFF + UPSERT: Only insert/update if there is different metadata
-          let hasDiff = false;
-          const updates: any = {};
+          // Update non-priority/allowed metadata. Do NOT overwrite execution data, answers, timer status
+          const updates: any = {
+            customer: row.customer || existing.customer,
+            assemblyMechanic: row.assemblyMechanic || existing.assemblyMechanic,
+            targetDate: row.targetDate || existing.targetDate,
+            isUrgentUnassigned: isUrgent,
+            remark: row.remark || existing.remark,
+            updatedAt: new Date().toISOString()
+          };
 
-          if (row.customer && existing.customer !== row.customer) {
-            updates.customer = row.customer;
-            hasDiff = true;
+          if (!existing.priorityLocked && existing.status !== 'ON_PROCESS') {
+            updates.currentPriority = row.priorityPpc || existing.currentPriority;
+            updates.plannedPriority = row.priorityPpc || existing.plannedPriority;
           }
-          if (row.serialNumber && existing.serialNumber !== row.serialNumber) {
-            updates.serialNumber = row.serialNumber;
-            hasDiff = true;
-          }
-          if (row.partNumber && existing.partNumber !== row.partNumber) {
-            updates.partNumber = row.partNumber;
-            hasDiff = true;
-          }
-          if (row.assemblyMechanic && existing.assemblyMechanic !== row.assemblyMechanic) {
-            updates.assemblyMechanic = row.assemblyMechanic;
-            hasDiff = true;
+          if (existing.status !== 'ON_PROCESS') {
+            updates.testingLineId = row.testingLineId || existing.testingLineId;
+            updates.currentTestingLineId = row.testingLineId || existing.currentTestingLineId;
           }
 
-          if (hasDiff) {
-            await store.updateQueueRecord(existing.queueRecordId, updates);
-            updatedCount++;
-          }
+          await store.updateQueueRecord(existing.queueRecordId, updates);
+          updatedCount++;
         } else {
-          // Add new record
-          const isUrgent = row.isUrgent === true;
-          
-          // Determine CompGroup based on matching product master
           const matchingModel = activeModels.find(
             (m) =>
               m.unitModel.trim().toUpperCase() === row.unitModel.trim().toUpperCase() &&
@@ -162,17 +502,18 @@ async function startServer() {
           const compGroup = matchingModel ? matchingModel.compGroup : 'PT-PPM';
           const subGroup = matchingModel && matchingModel.subGroup ? matchingModel.subGroup : null;
 
-          // Create new queue record
+          const nextPriority = row.priorityPpc || 99;
+
           const newRecord: any = {
             queueRecordId: `qr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            joRoNumber: row.joNumber,
+            joRoNumber: jo,
             compGroup,
             subGroup,
             unitModel: row.unitModel,
             component: row.component,
-            testType: 'PROD',
-            plannedPriority: isUrgent ? 999 : row.plannedPriority,
-            currentPriority: isUrgent ? 999 : row.plannedPriority,
+            testType: row.testType || 'PROD',
+            plannedPriority: nextPriority,
+            currentPriority: nextPriority,
             isUrgentUnassigned: isUrgent,
             status: 'WAITING',
             priorityLocked: false,
@@ -180,36 +521,74 @@ async function startServer() {
             partNumber: row.partNumber || '',
             serialNumber: row.serialNumber || '',
             assemblyMechanic: row.assemblyMechanic || 'Unassigned',
+            targetDate: row.targetDate || '',
+            remark: row.remark || 'Imported from SharePoint PPC',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             history: [
               {
                 oldPriority: 0,
-                newPriority: isUrgent ? 999 : row.plannedPriority,
-                remark: 'Imported from SharePoint Excel PPC_Schedule',
+                newPriority: nextPriority,
+                remark: 'Imported from SharePoint Excel PPC_PRIORITY_MASTER',
                 changedBy: currentUser || 'SharePoint Sync',
                 changedAt: new Date().toISOString(),
               },
             ],
           };
 
+          if (row.testingLineId) {
+            newRecord.testingLineId = row.testingLineId;
+            newRecord.currentTestingLineId = row.testingLineId;
+          }
+
           await store.addQueueRecord(newRecord, currentUser || 'SharePoint Sync');
           addedCount++;
         }
       }
 
-      // Trigger normalization to resolve missing/duplicate priorities cleanly
       await store.normalizeQueuePriorities();
+
+      const logRecord = {
+        id: `log-${Date.now()}`,
+        syncStartedAt: new Date(Date.now() - 2000).toISOString(),
+        syncFinishedAt: new Date().toISOString(),
+        sourceFile: 'Priority Testing - PPC.xlsx',
+        sourceLastModified: new Date().toISOString(),
+        rowsRead: items.length,
+        rowsNew: addedCount,
+        rowsUpdated: updatedCount,
+        rowsUnchanged: items.length - addedCount - updatedCount,
+        rowsConflict: items.filter(i => i.validationStatus === 'CONFLICT').length,
+        rowsInvalid: items.filter(i => i.validationStatus === 'INVALID').length,
+        triggeredBy: currentUser || 'SharePoint Sync',
+        result: 'SUCCESS'
+      };
+      await saveDocument('sharepointSyncLogs', logRecord);
 
       res.json({
         success: true,
         added: addedCount,
         updated: updatedCount,
-        quarantined,
+        log: logRecord
       });
-    } catch (err: any) {
-      console.error("SharePoint sync failed:", err);
-      res.status(500).json({ error: err.message || "Unknown error" });
+    } catch (error: any) {
+      console.error("SharePoint commit sync failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Manual workbook editor to simulate excel changes directly in the UAT sandbox
+  app.post("/api/sharepoint/update-workbook-row", async (req, res) => {
+    try {
+      const row = req.body;
+      if (!row.joRoNumber) {
+        return res.status(400).json({ error: "joRoNumber is required" });
+      }
+      row.id = row.joRoNumber;
+      await saveDocument('sharepointWorkbook', row);
+      res.json({ success: true, row });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

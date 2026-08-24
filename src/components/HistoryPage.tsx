@@ -264,16 +264,6 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         </div>
 
         <div className="flex items-center space-x-2 self-start sm:self-auto flex-wrap gap-y-2">
-          {onOpenSheetsModal && (
-            <button
-              onClick={onOpenSheetsModal}
-              className="bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700/80 text-xs font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition-colors shadow-xs"
-              title="Sync all historical records with Google Sheets"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-300" />
-              <span>Google Sheets Sync</span>
-            </button>
-          )}
           <button
             onClick={handleExportSummaryCSV}
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition-colors shadow-xs"

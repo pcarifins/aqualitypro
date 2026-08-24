@@ -73,7 +73,50 @@ export const sharepointService = {
     } catch {}
   },
 
-  // Sync workbook schedule via server proxy
+  // Fetch live server status of SharePoint sync and history
+  getStatus: async (): Promise<any> => {
+    const res = await fetch('/api/sharepoint/status');
+    if (!res.ok) throw new Error('Failed to load SharePoint status');
+    return res.json();
+  },
+
+  // Populate simulated SharePoint sheet with 15 UAT records
+  populateDummy: async (): Promise<any> => {
+    const res = await fetch('/api/sharepoint/populate-dummy', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to populate dummy UAT records');
+    return res.json();
+  },
+
+  // Get preview of pending excel changes with status details
+  getPreview: async (): Promise<any> => {
+    const res = await fetch('/api/sharepoint/preview');
+    if (!res.ok) throw new Error('Failed to load sync preview');
+    return res.json();
+  },
+
+  // Commit selected sync items into active Firestore priorityQueue
+  commitSync: async (items: any[], currentUser: string): Promise<any> => {
+    const res = await fetch('/api/sharepoint/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, currentUser }),
+    });
+    if (!res.ok) throw new Error('Failed to commit SharePoint synchronization');
+    return res.json();
+  },
+
+  // Edit simulated sheet row directly in the UAT sandbox
+  updateWorkbookRow: async (row: any): Promise<any> => {
+    const res = await fetch('/api/sharepoint/update-workbook-row', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(row),
+    });
+    if (!res.ok) throw new Error('Failed to update workbook row');
+    return res.json();
+  },
+
+  // Sync workbook schedule via server proxy (for backward compatibility if needed)
   syncWithStore: async (currentUser: string): Promise<{
     added: number;
     updated: number;

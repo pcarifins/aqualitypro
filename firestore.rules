@@ -69,6 +69,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /sharepointWorkbook/{rowId} {
+      allow read, write: if true;
+    }
+
+    match /sharepointSyncLogs/{logId} {
+      allow read, write: if true;
+    }
+
     match /_sync_test/{testId} {
       allow read, write: if true;
     }

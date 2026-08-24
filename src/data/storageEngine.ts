@@ -119,7 +119,11 @@ class DataStore {
     this.isInitialized = true;
 
     // 1. One-time migration if needed
-    await initializeAndMigrateFirestore();
+    try {
+      await initializeAndMigrateFirestore();
+    } catch (e) {
+      console.warn('Firestore migration skipped due to network/offline state. Operating in local cache mode.');
+    }
 
     // 2. Set up realtime listeners for all collections
     const unSubUsers = subscribeToCollection<User>('users', (data) => {

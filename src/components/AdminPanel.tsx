@@ -381,16 +381,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
-          {onOpenSheetsModal && (
-            <button
-              type="button"
-              onClick={onOpenSheetsModal}
-              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors shrink-0 shadow-2xs"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Google Sheets Sync</span>
-            </button>
-          )}
         </div>
       </div>
 
