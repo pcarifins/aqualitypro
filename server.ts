@@ -1,15 +1,7 @@
 import express from "express";
 import path from "path";
-import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { store } from "./src/data/storageEngine";
-import {
-  fetchRealSharePointPPCData,
-  resolveSharePointDriveItem,
-  DEFAULT_SHAREPOINT_PPC_URL,
-} from "./server/sharepointGraphService";
-
-dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -22,64 +14,7 @@ async function startServer() {
     res.json({ status: "ok", app: "KRA Test Record", time: new Date().toISOString() });
   });
 
-  // --- SHAREPOINT PPC ENDPOINTS ---
-  app.get("/api/sharepoint/status", async (req, res) => {
-    const hasTenant = !!process.env.MICROSOFT_TENANT_ID;
-    const hasClient = !!process.env.MICROSOFT_CLIENT_ID;
-    const hasSecret = !!process.env.MICROSOFT_CLIENT_SECRET;
-    const sharingUrl = process.env.SHAREPOINT_PPC_FILE_URL || DEFAULT_SHAREPOINT_PPC_URL;
-
-    res.json({
-      configured: hasTenant && hasClient && hasSecret,
-      missingConfig: [
-        !hasTenant && 'MICROSOFT_TENANT_ID',
-        !hasClient && 'MICROSOFT_CLIENT_ID',
-        !hasSecret && 'MICROSOFT_CLIENT_SECRET',
-      ].filter(Boolean),
-      sharingUrl,
-      targetFileName: "Priority Testing - PPC.xlsx",
-      mode: hasTenant && hasClient && hasSecret ? 'MICROSOFT_GRAPH' : 'ANONYMOUS_FIRST',
-    });
-  });
-
-  app.get("/api/sharepoint/driveItem", async (req, res) => {
-    try {
-      const sharingUrl = (req.query.url as string) || process.env.SHAREPOINT_PPC_FILE_URL || DEFAULT_SHAREPOINT_PPC_URL;
-      const { metadata } = await resolveSharePointDriveItem(sharingUrl);
-      res.json({
-        success: true,
-        driveId: metadata.driveId,
-        itemId: metadata.itemId,
-        fileName: metadata.fileName,
-        webUrl: metadata.webUrl,
-        lastModifiedDateTime: metadata.lastModifiedDateTime,
-        accessMode: metadata.accessMode,
-      });
-    } catch (err: any) {
-      res.status(err.message?.includes('AUTHENTICATION REQUIRED') ? 400 : 500).json({
-        success: false,
-        error: err.message || "Failed to resolve driveItem from Microsoft Graph",
-      });
-    }
-  });
-
-  app.get("/api/sharepoint/ppc-data", async (req, res) => {
-    try {
-      const result = await fetchRealSharePointPPCData();
-      res.json(result);
-    } catch (err: any) {
-      console.error("[SharePoint PPC API Error]:", err.message);
-      const isAuthError =
-        err.message?.includes('AUTHENTICATION REQUIRED') ||
-        err.message?.includes('MICROSOFT_CONFIGURATION_REQUIRED');
-      res.status(isAuthError ? 400 : 500).json({
-        success: false,
-        error: err.message || "SHAREPOINT AUTHENTICATION REQUIRED: Failed to fetch binary XLSX data from SharePoint.",
-        code: isAuthError ? "SHAREPOINT_AUTHENTICATION_REQUIRED" : "GRAPH_SYNC_ERROR",
-      });
-    }
-  });
-
+  // --- SHAREPOINT ENDPOINTS ---
   app.post("/api/sharepoint/auth", (req, res) => {
     const { email, name } = req.body;
     res.json({
@@ -94,69 +29,102 @@ async function startServer() {
       const { currentUser } = req.body;
       const activeModels = store.getProductModels(true);
 
-      // Fetch and parse REAL Excel data from SharePoint sharing link
-      const excelResult = await fetchRealSharePointPPCData();
-      const realSharePointData = excelResult.items;
+      // B5. DATA SCHEMAS: The SharePoint excel workbook contains a table or tab named "PPC_Schedule" with these columns
+      const mockSharePointData = [
+        // 1. Existing JO (Diff + Upsert): newer metadata
+        {
+          joNumber: '24109881',
+          unitModel: 'HD785-7',
+          component: 'ENGINE ASSY',
+          plannedPriority: 1,
+          isUrgent: false,
+          customer: 'PT Freeport Indonesia (SharePoint Sync)', // updated customer!
+          assemblyMechanic: 'Ardian Hidayat (Sync)', // updated mechanic!
+          partNumber: '6217-00-1001',
+          serialNumber: 'SN-ENG-8812-SYNC', // updated serial number!
+        },
+        // 2. New valid JO
+        {
+          joNumber: '24109887',
+          unitModel: 'PC2000-8R',
+          component: 'ENGINE ASSY',
+          plannedPriority: 3,
+          isUrgent: false,
+          customer: 'PT United Tractors Tbk',
+          assemblyMechanic: 'Ahmad Fauzi',
+          partNumber: '6219-00-2002',
+          serialNumber: 'SN-ENG-9901',
+        },
+        // 3. New valid JO with duplicate priority 3
+        {
+          joNumber: '24109888',
+          unitModel: 'PC2000-8R',
+          component: 'ENGINE ASSY',
+          plannedPriority: 3, // duplicate priority!
+          isUrgent: false,
+          customer: 'PT United Tractors Tbk',
+          assemblyMechanic: 'Ahmad Fauzi',
+          partNumber: '6219-00-2002',
+          serialNumber: 'SN-ENG-9902',
+        },
+        // 4. Urgent Unassigned JO
+        {
+          joNumber: '24109893',
+          unitModel: 'PC1250SP-8R',
+          component: 'MAIN PUMP NO 1',
+          plannedPriority: 0,
+          isUrgent: true,
+          customer: 'PT Berau Coal',
+          assemblyMechanic: 'Kurniawan',
+          partNumber: '708-2L-00400',
+          serialNumber: 'SN-PPM-7722',
+        },
+        // 5. Invalid JO (Unconfigured Product Master)
+        {
+          joNumber: '24109894',
+          unitModel: 'INVALID-999', // Not in Product Master
+          component: 'UNKNOWN COMPONENT',
+          plannedPriority: 4,
+          isUrgent: false,
+          customer: 'PT Astra Heavy',
+          assemblyMechanic: 'Budi',
+          partNumber: '111-22-33333',
+          serialNumber: 'SN-UNKNOWN-1',
+        }
+      ];
 
       const quarantined: any[] = [];
       let addedCount = 0;
       let updatedCount = 0;
-      let unchangedCount = 0;
-      let invalidCount = 0;
-      let conflictCount = 0;
 
       const currentQueue = store.getQueueRecords();
 
-      for (const row of realSharePointData) {
-        // 1. PRODUCT MASTER GATING: Verify unitModel and component match an ACTIVE entry in Product Master
-        const matchingModel = activeModels.find(
+      for (const row of mockSharePointData) {
+        // B4. PRODUCT MASTER GATING: Verify unitModel and component matches ACTIVE entry in Product Master (m.active === true)
+        const isValidProduct = activeModels.some(
           (m) =>
             m.unitModel.trim().toUpperCase() === row.unitModel.trim().toUpperCase() &&
             m.component.trim().toUpperCase() === row.component.trim().toUpperCase() &&
             m.active === true
         );
 
-        if (!matchingModel) {
-          invalidCount++;
+        if (!isValidProduct) {
           quarantined.push({
-            joNumber: row.joRoNumber,
+            joNumber: row.joNumber,
             unitModel: row.unitModel,
             component: row.component,
-            reason: "INVALID: Product Model or Component combination does not exist in active Product Master",
+            reason: "Product Model or Component is inactive or not configured in Product Master",
           });
           continue;
         }
 
-        // 2. CHECK DUPLICATE JO (Both Manual and SharePoint sourced JOs)
-        const cleanJo = row.joRoNumber.trim().toUpperCase();
+        // Find if this JO already exists in active queue (status not FINISH)
         const existing = currentQueue.find(
-          (q) => q.joRoNumber.trim().toUpperCase() === cleanJo && q.status !== 'FINISH'
+          (q) => q.joRoNumber.toUpperCase() === row.joNumber.toUpperCase() && q.status !== 'FINISH'
         );
 
         if (existing) {
-          // Check if JO is already RUNNING / ON_PROCESS / RECEIVED
-          const isExecuting =
-            existing.status === 'ON_PROCESS' ||
-            !!existing.receivingTime ||
-            !!existing.gltReceivingTime ||
-            existing.priorityLocked === true;
-
-          // Check if there is an unmergable operational conflict (e.g. attempting to alter component on running job)
-          if (
-            isExecuting &&
-            (existing.compGroup !== matchingModel.compGroup ||
-              existing.component.toUpperCase() !== row.component.toUpperCase() ||
-              existing.unitModel.toUpperCase() !== row.unitModel.toUpperCase())
-          ) {
-            conflictCount++;
-            quarantined.push({
-              joNumber: row.joRoNumber,
-              reason: "CONFLICT: Active testing JO already in execution with conflicting unit/component specification",
-            });
-            continue;
-          }
-
-          // 3. DIFF + UPSERT: Only update safe non-execution metadata
+          // B3. DIFF + UPSERT: Only insert/update if there is different metadata
           let hasDiff = false;
           const updates: any = {};
 
@@ -176,59 +144,35 @@ async function startServer() {
             updates.assemblyMechanic = row.assemblyMechanic;
             hasDiff = true;
           }
-          if (row.targetDate && existing.targetDate !== row.targetDate) {
-            updates.targetDate = row.targetDate;
-            hasDiff = true;
-          }
-          if (matchingModel.subGroup && existing.subGroup !== matchingModel.subGroup) {
-            updates.subGroup = matchingModel.subGroup;
-            hasDiff = true;
-          }
-
-          // If not yet running and plannedPriority differs, only update if not manually locked
-          if (!isExecuting && row.plannedPriority && existing.plannedPriority !== row.plannedPriority) {
-            updates.plannedPriority = row.plannedPriority;
-            hasDiff = true;
-          }
 
           if (hasDiff) {
             await store.updateQueueRecord(existing.queueRecordId, updates);
             updatedCount++;
-          } else {
-            unchangedCount++;
           }
         } else {
-          // 4. ADD NEW SHAREPOINT JO
+          // Add new record
           const isUrgent = row.isUrgent === true;
-          const compGroup = matchingModel.compGroup;
-          const subGroup = matchingModel.subGroup || row.subGroup || null;
-
-          // Normal priority = highest active priority in group + 1
-          const activeRankedInGroup = currentQueue.filter(
-            (q) =>
-              q.compGroup === compGroup &&
-              !q.isUrgentUnassigned &&
-              (q.status === 'WAITING' || q.status === 'ON_PROCESS')
+          
+          // Determine CompGroup based on matching product master
+          const matchingModel = activeModels.find(
+            (m) =>
+              m.unitModel.trim().toUpperCase() === row.unitModel.trim().toUpperCase() &&
+              m.component.trim().toUpperCase() === row.component.trim().toUpperCase()
           );
-          const maxPrio = activeRankedInGroup.reduce(
-            (max, q) => Math.max(max, q.currentPriority || 0),
-            0
-          );
-          const nextPrio = maxPrio + 1;
-          const assignedPriority = isUrgent ? 999 : (row.plannedPriority || nextPrio);
+          const compGroup = matchingModel ? matchingModel.compGroup : 'PT-PPM';
+          const subGroup = matchingModel && matchingModel.subGroup ? matchingModel.subGroup : null;
 
+          // Create new queue record
           const newRecord: any = {
             queueRecordId: `qr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            joRoNumber: cleanJo,
+            joRoNumber: row.joNumber,
             compGroup,
             subGroup,
-            unitModel: row.unitModel.trim().toUpperCase(),
-            component: row.component.trim().toUpperCase(),
-            productModelId: matchingModel.id,
-            productMasterId: matchingModel.id,
-            testType: row.testType || 'PROD',
-            plannedPriority: assignedPriority,
-            currentPriority: assignedPriority,
+            unitModel: row.unitModel,
+            component: row.component,
+            testType: 'PROD',
+            plannedPriority: isUrgent ? 999 : row.plannedPriority,
+            currentPriority: isUrgent ? 999 : row.plannedPriority,
             isUrgentUnassigned: isUrgent,
             status: 'WAITING',
             priorityLocked: false,
@@ -236,59 +180,36 @@ async function startServer() {
             partNumber: row.partNumber || '',
             serialNumber: row.serialNumber || '',
             assemblyMechanic: row.assemblyMechanic || 'Unassigned',
-            targetDate: row.targetDate,
-            remark: row.remark,
-            source: 'SHAREPOINT',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             history: [
               {
                 oldPriority: 0,
-                newPriority: assignedPriority,
-                remark: `Imported from SharePoint Excel ${excelResult.metadata.fileName} (${excelResult.sheetName})`,
+                newPriority: isUrgent ? 999 : row.plannedPriority,
+                remark: 'Imported from SharePoint Excel PPC_Schedule',
                 changedBy: currentUser || 'SharePoint Sync',
                 changedAt: new Date().toISOString(),
               },
             ],
           };
 
-          if (row.testType === 'RETEST') {
-            newRecord.aiRecommendation = {
-              suggestedPriority: 1,
-              reason: 'Retest inspection item with priority delivery requirement.',
-            };
-          }
-
           await store.addQueueRecord(newRecord, currentUser || 'SharePoint Sync');
           addedCount++;
         }
       }
 
-      // Trigger normalization to maintain consistent priorities cleanly
+      // Trigger normalization to resolve missing/duplicate priorities cleanly
       await store.normalizeQueuePriorities();
 
       res.json({
         success: true,
         added: addedCount,
         updated: updatedCount,
-        unchanged: unchangedCount,
-        invalid: invalidCount,
-        conflict: conflictCount,
         quarantined,
-        fileName: excelResult.metadata.fileName,
-        rowsRead: excelResult.rowsRead,
-        sheetName: excelResult.sheetName,
       });
     } catch (err: any) {
-      console.error("[SharePoint Sync Error]:", err.message);
-      const isAuthError =
-        err.message?.includes('AUTHENTICATION REQUIRED') ||
-        err.message?.includes('MICROSOFT_CONFIGURATION_REQUIRED');
-      res.status(isAuthError ? 400 : 500).json({
-        success: false,
-        error: err.message || "SHAREPOINT AUTHENTICATION REQUIRED: Could not read Excel file from SharePoint.",
-        code: isAuthError ? "SHAREPOINT_AUTHENTICATION_REQUIRED" : "SYNC_ERROR",
-      });
+      console.error("SharePoint sync failed:", err);
+      res.status(500).json({ error: err.message || "Unknown error" });
     }
   });
 
@@ -297,194 +218,306 @@ async function startServer() {
     res.json(store.getUsers());
   });
 
-  app.post("/api/users", async (req, res) => {
-    try {
-      await store.saveUser(req.body);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
+  app.post("/api/users", (req, res) => {
+    store.saveUser(req.body);
+    res.json({ success: true, user: req.body });
   });
 
-  // Product Models
-  app.get("/api/product-models", (req, res) => {
-    const onlyActive = req.query.onlyActive === "true";
-    res.json(store.getProductModels(onlyActive));
+  app.post("/api/users/:id/password", (req, res) => {
+    const { password } = req.body;
+    store.changeUserPassword(req.params.id, password);
+    res.json({ success: true });
   });
 
-  app.post("/api/product-models", async (req, res) => {
-    try {
-      const { model, actorName } = req.body;
-      await store.saveProductModel(model, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Checksheet Templates
-  app.get("/api/checksheet-templates", (req, res) => {
-    const filter = {
-      compGroup: req.query.compGroup as any,
-      unitModel: req.query.unitModel as string,
-      component: req.query.component as string,
-      testStage: req.query.testStage as any,
-      status: req.query.status as any,
-    };
-    res.json(store.getChecksheetTemplates(filter));
-  });
-
-  app.post("/api/checksheet-templates", async (req, res) => {
-    try {
-      const { template, actorName } = req.body;
-      await store.saveChecksheetTemplate(template, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Queue Records
-  app.get("/api/queue-records", (req, res) => {
-    const compGroup = req.query.compGroup as any;
-    res.json(store.getQueueRecords(compGroup));
-  });
-
-  app.post("/api/queue-records", async (req, res) => {
-    try {
-      const { record, actorName } = req.body;
-      await store.addQueueRecord(record, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.put("/api/queue-records/:id", async (req, res) => {
-    try {
-      await store.updateQueueRecord(req.params.id, req.body);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // GLT Records
-  app.get("/api/glt-records", (req, res) => {
-    res.json(store.getGLTRecords());
-  });
-
-  app.post("/api/glt-records", async (req, res) => {
-    try {
-      const saved = await store.saveGLTRecord(req.body);
-      res.json(saved);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Dyno Records
-  app.get("/api/dyno-records", (req, res) => {
-    res.json(store.getDynoRecords());
-  });
-
-  app.post("/api/dyno-records", async (req, res) => {
-    try {
-      const saved = await store.saveDynoRecord(req.body);
-      res.json(saved);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Hydraulic Records
-  app.get("/api/hydraulic-records", (req, res) => {
-    res.json(store.getHydraulicRecords());
-  });
-
-  app.post("/api/hydraulic-records", async (req, res) => {
-    try {
-      const saved = await store.saveHydraulicRecord(req.body);
-      res.json(saved);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Testing Lines
-  app.get("/api/testing-lines", (req, res) => {
-    const onlyActive = req.query.onlyActive === "true";
-    res.json(store.getTestingLines(onlyActive));
-  });
-
-  app.post("/api/testing-lines", async (req, res) => {
-    try {
-      const { line, actorName } = req.body;
-      await store.saveTestingLine(line, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Test Overrides
-  app.get("/api/test-overrides", (req, res) => {
-    res.json(store.getTestOverrides());
-  });
-
-  app.post("/api/test-overrides", async (req, res) => {
-    try {
-      const { override, actorName } = req.body;
-      await store.saveTestOverride(override, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Audit Logs
-  app.get("/api/audit-logs", (req, res) => {
-    res.json(store.getAuditLogs());
+  app.delete("/api/users/:id", (req, res) => {
+    store.deleteUser(req.params.id);
+    res.json({ success: true });
   });
 
   // Assemblers
   app.get("/api/assemblers", (req, res) => {
-    const onlyActive = req.query.onlyActive === "true";
+    const onlyActive = req.query.active === 'true';
     res.json(store.getAssemblers(onlyActive));
   });
 
-  app.post("/api/assemblers", async (req, res) => {
+  app.post("/api/assemblers", (req, res) => {
+    store.saveAssembler(req.body);
+    res.json({ success: true, assembler: req.body });
+  });
+
+  app.delete("/api/assemblers/:id", (req, res) => {
+    store.deleteAssembler(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Product Models
+  app.get("/api/models", (req, res) => {
+    const onlyActive = req.query.active === 'true';
+    res.json(store.getProductModels(onlyActive));
+  });
+
+  app.post("/api/models", (req, res) => {
+    store.saveProductModel(req.body);
+    res.json({ success: true, model: req.body });
+  });
+
+  app.delete("/api/models/:id", (req, res) => {
+    store.deleteProductModel(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Checksheet Templates
+  app.get("/api/checksheet-templates", (req, res) => {
+    const filter = req.query as any;
+    res.json(store.getChecksheetTemplates(filter));
+  });
+
+  app.get("/api/checksheet-templates/active", (req, res) => {
+    const { compGroup, unitModel, component, testStage } = req.query;
+    const tmpl = store.getActiveTemplate(
+      compGroup as string,
+      unitModel as string,
+      component as string,
+      testStage as any
+    );
+    res.json(tmpl);
+  });
+
+  app.get("/api/checksheet-templates/:id", (req, res) => {
+    const tmpl = store.getChecksheetTemplateById(req.params.id);
+    if (!tmpl) return res.status(404).json({ error: "Template not found" });
+    res.json(tmpl);
+  });
+
+  app.post("/api/checksheet-templates", (req, res) => {
+    store.saveChecksheetTemplate(req.body);
+    res.json({ success: true, template: req.body });
+  });
+
+  app.post("/api/checksheet-templates/:id/activate", (req, res) => {
+    store.activateChecksheetTemplate(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/checksheet-templates/:id/revision", (req, res) => {
+    const newTmpl = store.createRevisionChecksheetTemplate(req.params.id);
+    res.json({ success: true, template: newTmpl });
+  });
+
+  app.post("/api/checksheet-templates/:id/duplicate", (req, res) => {
+    const newTmpl = store.duplicateChecksheetTemplate(req.params.id);
+    res.json({ success: true, template: newTmpl });
+  });
+
+  app.delete("/api/checksheet-templates/:id", (req, res) => {
+    store.deleteChecksheetTemplate(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Checksheets (Legacy)
+  app.get("/api/checksheets", (req, res) => {
+    const process = req.query.process as any;
+    const category = req.query.category as any;
+    res.json(store.getChecksheetItems(process, category));
+  });
+
+  app.post("/api/checksheets", (req, res) => {
+    store.saveChecksheetItem(req.body);
+    res.json({ success: true, item: req.body });
+  });
+
+  app.delete("/api/checksheets/:id", (req, res) => {
+    store.deleteChecksheetItem(req.params.id);
+    res.json({ success: true });
+  });
+
+  // JO Search & Lookup
+  app.get("/api/jo/lookup", (req, res) => {
+    const { joNumber, stage } = req.query;
+    if (!joNumber || !stage) {
+      return res.status(400).json({ error: "joNumber and stage query params required" });
+    }
+    const result = store.lookupJOForStage(joNumber as string, stage as any);
+    if (!result) {
+      return res.status(404).json({ error: `JO Number '${joNumber}' not found in GLT submitted records.` });
+    }
+    if ("error" in result) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json(result);
+  });
+
+  // Records: GLT
+  app.get("/api/records/glt", (req, res) => {
+    res.json(store.getGLTRecords());
+  });
+
+  app.post("/api/records/glt", (req, res) => {
+    const saved = store.saveGLTRecord(req.body);
+    res.json({ success: true, record: saved });
+  });
+
+  // Records: Dynotest
+  app.get("/api/records/dyno", (req, res) => {
+    res.json(store.getDynoRecords());
+  });
+
+  app.post("/api/records/dyno", (req, res) => {
+    const saved = store.saveDynoRecord(req.body);
+    res.json({ success: true, record: saved });
+  });
+
+  // Records: Hydraulic
+  app.get("/api/records/hydraulic", (req, res) => {
+    res.json(store.getHydraulicRecords());
+  });
+
+  app.post("/api/records/hydraulic", (req, res) => {
+    const saved = store.saveHydraulicRecord(req.body);
+    res.json({ success: true, record: saved });
+  });
+
+  // Combined JO History
+  app.get("/api/records/history", (req, res) => {
+    const filters = req.query as any;
+    res.json(store.getCombinedJOHistory(filters));
+  });
+
+  // Dashboard Stats
+  app.get("/api/dashboard/stats", (req, res) => {
+    const filters = req.query as any;
+    res.json(store.getDashboardStats(filters));
+  });
+
+  // Seed Reset
+  app.post("/api/seed/reset", (req, res) => {
+    store.resetToDefault();
+    res.json({ success: true, message: "Database reset to initial seed data." });
+  });
+
+  // AI Troubleshooting Suggestions (Gemini API)
+  app.post("/api/troubleshoot", async (req, res) => {
     try {
-      const { assembler, actorName } = req.body;
-      await store.saveAssembler(assembler, actorName);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      const { process, unitModel, component, ngItem, ngDescription } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.json({
+          fallback:
+            `AI ADVISORY ONLY (Key Not Configured):\n` +
+            `• Check mating surfaces, O-rings, and oil seal orientation for damage or pinched rubber.\n` +
+            `• Verify bolt torque values according to Komatsu shop manual specs.\n` +
+            `• Inspect hydraulic hoses, fittings, and quick disconnects for tightness.\n` +
+            `• Verify sensor electrical connectors, ground wires, and harness routing.\n` +
+            `• Re-check pressure relief valve adjustments and oil cleaniness level.`
+        });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are an advisory AI engineering assistant for Komatsu Remanufacturing Asia heavy equipment component quality testing.
+Process Stage: ${process || "Testing"}
+Unit Model: ${unitModel || "Unknown"}
+Component: ${component || "Unknown"}
+NOT GOOD Parameter / Defect: ${ngItem || "General Failure"}
+Operator Remarks: ${ngDescription || "None"}
+
+Provide 3-5 concise, practical, actionable troubleshooting suggestions for heavy machinery mechanics/inspectors regarding this NOT GOOD finding.
+Focus on standard mechanical checks (e.g., O-rings, seals, bolt torques, hose fittings, electrical/sensor connections, pressure relief settings, assembly alignment).
+
+MANDATORY RULES:
+1. Always start with: "AI ADVISORY ONLY: These suggestions are provided as reference guidance and do not replace official Komatsu shop manuals or standard operating procedures (SOP)."
+2. Format as clear bullet points with bold titles.
+3. Keep it brief and directly relevant.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      const text = response.text || "No suggestion generated.";
+      res.json({ suggestion: text });
+    } catch (err: any) {
+      console.warn("AI Troubleshooting error:", err);
+      res.json({
+        fallback:
+          `AI ADVISORY ONLY (System Fallback):\n` +
+          `• Check mating surfaces, O-rings, and oil seal orientation for damage or pinched rubber.\n` +
+          `• Verify bolt torque values according to Komatsu shop manual specs.\n` +
+          `• Inspect hydraulic hoses, fittings, and quick disconnects for tightness.\n` +
+          `• Verify sensor electrical connectors, ground wires, and harness routing.\n` +
+          `• Re-check pressure relief valve adjustments and oil cleaniness level.`
+      });
     }
   });
 
-  // Combined JO Data for Details/Reports
-  app.get("/api/jo-records/:joNumber", (req, res) => {
-    const results = store.getCombinedJOHistory({ joNumber: req.params.joNumber });
-    const jo = results.find(r => r.joNumber.toUpperCase() === req.params.joNumber.toUpperCase()) || results[0];
-    if (!jo) {
-      res.status(404).json({ error: "JO not found" });
-    } else {
-      res.json(jo);
+  // AI Performance Summary (Gemini API)
+  app.post("/api/performance-summary", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.json({
+          fallback: `AI Performance analysis is currently unavailable (API Key not configured in panel). Please check your workspace configuration.`
+        });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const metrics = req.body;
+      const prompt = `You are an operations executive AI director at Komatsu Remanufacturing Asia's quality center.
+Analyze this raw monthly performance and testing volume metrics dashboard across our three main component flows: Engine, PT-PPM, and Cylinder.
+
+DASHBOARD DATA METRICS:
+${JSON.stringify(metrics, null, 2)}
+
+Provide a concise, professional operations summary formatted in beautiful Markdown.
+You must use these EXACT headers:
+
+### KEY HIGHLIGHT
+Identify the most remarkable performance milestone, volume spike, or high compliance rate.
+
+### MAIN CONCERN
+Highlight the main bottleneck, long lead times, or highest NG defect rate that demands operational intervention.
+
+### BEST IMPROVING GROUP
+Name the specific component group showing positive cycle time compression or quality improvements.
+
+### GROUP REQUIRING ATTENTION
+Name the specific component group that has stagnated or deteriorated, citing its average lead times or defect counts.
+
+### SUGGESTED FOLLOW-UP
+List 2-3 specific, actionable engineering checks (e.g., tooling checks, checklist reviews, cycle audits) for supervisors to address the bottlenecks.
+
+MANDATORY WRITING DIRECTIVES:
+- Keep the writing extremely high-end, professional, objective, and management-oriented.
+- Do NOT hypothesize or speculate on external causes (e.g. weather, raw material shipping). Frame everything around internal testing station cycle operations and testing pass rates.
+- Do NOT use self-praise or flowery marketing adjectives. Use precise operational verbs like "indicates", "shows", "suggests", or "requires attention".
+- Ensure the output is concise and visually clean.`;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: prompt,
+      });
+
+      res.json({ summary: result.text || "No summary generated." });
+    } catch (err: any) {
+      console.warn("AI Performance summary error:", err);
+      res.json({
+        fallback: `AI Performance Summary Service is currently unavailable. Details: ${err.message || "unknown error"}`
+      });
     }
   });
 
-  // PDF Reports
-  app.get("/api/pdf-reports/:joNumber", (req, res) => {
-    res.json(store.getPDFReportsForJO(req.params.joNumber));
-  });
-
-  // Quality Certificates
-  app.get("/api/certificates/:joNumber", (req, res) => {
-    res.json(store.getCertificatesForJO(req.params.joNumber));
-  });
-
-  // --- VITE SPA SERVING ---
+  // --- VITE / STATIC SERVING ---
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -494,7 +527,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*all", (req, res) => {
+    app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

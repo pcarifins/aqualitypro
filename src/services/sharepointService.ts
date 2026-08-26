@@ -58,8 +58,8 @@ export const sharepointService = {
       isConnected: true,
       userEmail: data.email || email,
       userName: data.name || name,
-      siteName: 'Komatsu KRA SharePoint / OneDrive for Business',
-      workbookPath: 'Priority Testing - PPC.xlsx',
+      siteName: 'Komatsu KRA Business OneDrive',
+      workbookPath: '/Documents/PPC_Production_Schedule.xlsx',
       lastSyncTime: new Date().toISOString(),
     };
 

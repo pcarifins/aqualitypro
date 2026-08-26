@@ -309,7 +309,7 @@ export const SharePointModal: React.FC<SharePointModalProps> = ({
                   </div>
 
                   <div className="text-[10px] bg-slate-100 px-2.5 py-1 rounded-md text-slate-600 font-bold border border-slate-200">
-                    File: Priority Testing - PPC.xlsx
+                    Table: PPC_Schedule
                   </div>
                 </div>
 

@@ -223,8 +223,6 @@ export interface QueueRecord {
   partNumber?: string;
   serialNumber?: string;
   assemblyMechanic?: string;
-  targetDate?: string;
-  source?: 'MANUAL' | 'SHAREPOINT';
   createdAt: string;
   updatedAt: string;
   history: PriorityChangeHistory[];

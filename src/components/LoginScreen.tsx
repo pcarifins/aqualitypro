@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
+import { initialUsers } from '../data/initialData';
 import {
   Lock,
   User as UserIcon,
@@ -41,11 +42,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsLoading(true);
 
     setTimeout(() => {
-      const matched = users.find(
+      const allUsers = [...(users || []), ...initialUsers];
+      const uniqueUsersMap = new Map();
+      allUsers.forEach((u) => {
+        if (u && (u.id || u.username)) {
+          uniqueUsersMap.set(u.id || u.username, u);
+        }
+      });
+      const resolvedUsers = Array.from(uniqueUsersMap.values());
+
+      const matched = resolvedUsers.find(
         (u) =>
-          u.active &&
-          (u.username.toLowerCase() === cleanUsername ||
-            u.id.toLowerCase() === cleanUsername)
+          u.active !== false &&
+          ((u.username && u.username.toLowerCase() === cleanUsername) ||
+            (u.id && u.id.toLowerCase() === cleanUsername) ||
+            (u.name && u.name.toLowerCase() === cleanUsername))
       );
 
       if (!matched) {

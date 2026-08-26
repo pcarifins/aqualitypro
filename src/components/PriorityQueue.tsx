@@ -52,13 +52,6 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmittingJO, setIsSubmittingJO] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [sharePointMeta, setSharePointMeta] = useState<{
-    lastSync?: string;
-    rows?: number;
-    fileName?: string;
-    status: 'Idle' | 'Connected' | 'Error';
-  }>({ status: 'Idle' });
   const [formError, setFormError] = useState<string | null>(null);
 
   // Modals
@@ -211,31 +204,10 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
   const handleSyncPPC = async () => {
     setIsLoading(true);
-    setSyncFeedback(null);
-    setSyncError(null);
-    try {
-      const res = await apiClient.syncPPCDataSource(currentUserName);
-      setSharePointMeta({
-        lastSync: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        rows: res.rowsRead || 0,
-        fileName: res.fileName || 'Priority Testing - PPC.xlsx',
-        status: 'Connected',
-      });
-      setSyncFeedback(
-        `SharePoint Sync (${res.fileName || 'Priority Testing - PPC.xlsx'}): ${res.added} NEW, ${res.updated} UPDATED, ${res.unchanged || 0} UNCHANGED, ${res.invalid || 0} INVALID, ${res.conflict || 0} CONFLICT.`
-      );
-      await loadQueue();
-      setTimeout(() => setSyncFeedback(null), 8000);
-    } catch (err: any) {
-      setSharePointMeta((prev) => ({
-        ...prev,
-        status: 'Error',
-      }));
-      setSyncError(`SharePoint Sync: ${err?.message || 'SHAREPOINT AUTHENTICATION REQUIRED'}`);
-      setTimeout(() => setSyncError(null), 10000);
-    } finally {
-      setIsLoading(false);
-    }
+    const res = await apiClient.syncPPCDataSource(currentUserName);
+    setSyncFeedback(`PPC Sync completed: ${res.added} new jobs added, ${res.updated} updated.`);
+    await loadQueue();
+    setTimeout(() => setSyncFeedback(null), 5000);
   };
 
   const handleMoveUp = (item: QueueRecord) => {
@@ -356,7 +328,6 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       partNumber: newPartNumber.trim(),
       serialNumber: newSerialNumber.trim(),
       assemblyMechanic: newMechanic.trim() || 'Unassigned',
-      source: 'MANUAL',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       history: [
@@ -421,38 +392,25 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          {sharePointMeta.lastSync && (
-            <div className="text-[11px] text-slate-400 flex items-center space-x-2 mr-2 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
-              <span className={`w-2 h-2 rounded-full ${sharePointMeta.status === 'Connected' ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-              <span>SharePoint: <strong className="text-slate-200">{sharePointMeta.status}</strong></span>
-              <span>•</span>
-              <span>{sharePointMeta.rows || 0} rows</span>
-              <span>•</span>
-              <span>{sharePointMeta.lastSync}</span>
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleSyncPPC}
+            disabled={isLoading}
+            className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Sync PPC Source</span>
+          </button>
 
-          <div className="flex items-center gap-2">
+          {canReorder && (
             <button
-              onClick={handleSyncPPC}
-              disabled={isLoading}
-              className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Sync SharePoint</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Manual JO</span>
             </button>
-
-            {canReorder && (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Manual JO</span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
@@ -460,13 +418,6 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center space-x-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{syncFeedback}</span>
-        </div>
-      )}
-
-      {syncError && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center space-x-2">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-          <span>{syncError}</span>
         </div>
       )}
 
