@@ -23,7 +23,7 @@ import {
 } from '../types';
 
 import { store } from '../data/storageEngine';
-import { prioritySourceService } from '../services/prioritySourceService';
+import { prioritySourceService, PPCSyncResult } from '../services/prioritySourceService';
 import { pdfReportService } from '../services/pdfReportService';
 
 export const apiClient = {
@@ -205,7 +205,7 @@ export const apiClient = {
     return store.applyAIRecommendation(queueRecordId, changedBy);
   },
 
-  syncPPCDataSource: async (currentUser: string): Promise<{ added: number; updated: number }> => {
+  syncPPCDataSource: async (currentUser: string): Promise<PPCSyncResult> => {
     return await prioritySourceService.syncWithStore(currentUser);
   },
 
