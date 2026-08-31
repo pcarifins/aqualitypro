@@ -1,21 +1,89 @@
 import express from "express";
 import path from "path";
+import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import { store } from "./src/data/storageEngine";
-import { syncSharePointPPC } from "./server/sharepointPpcService";
+import { syncGoogleSheetsPPC, processWorkbookBuffer } from "./server/googleSheetPpcService";
+import { saveUatFixtureFile, generateUatWorkbook } from "./server/generateUatFixture";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "15mb" }));
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+  // Ensure UAT fixture file exists
+  try {
+    saveUatFixtureFile();
+  } catch (err) {
+    console.warn("Failed to generate UAT fixture file:", err);
+  }
 
   // --- REST API ENDPOINTS ---
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", app: "KRA Test Record", time: new Date().toISOString() });
   });
 
-  // --- SHAREPOINT ENDPOINTS ---
+  // --- PPC GOOGLE SHEETS / EXCEL SYNC ENDPOINTS ---
+  app.get("/api/ppc/status", (req, res) => {
+    res.json({
+      spreadsheetId: process.env.PPC_GOOGLE_SPREADSHEET_ID || "1vO_p2N1cTr0tMRU6ZuPjUjGeyOaW-eA0KF5JLnTigyQ",
+      status: "online",
+      lastSync: new Date().toISOString(),
+    });
+  });
+
+  app.post("/api/ppc/sync", async (req, res) => {
+    try {
+      const { currentUser } = req.body;
+      const result = await syncGoogleSheetsPPC(currentUser);
+      res.json(result);
+    } catch (err: any) {
+      console.error("Google Sheets PPC sync failed:", err);
+      res.status(500).json({ error: err.message || "Unknown error during Google Sheets sync" });
+    }
+  });
+
+  app.get("/api/ppc/uat-template", (req, res) => {
+    try {
+      const buf = generateUatWorkbook();
+      res.setHeader('Content-Disposition', 'attachment; filename="AQualityPro_UAT_PPC_Capacity.xlsx"');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to generate UAT template" });
+    }
+  });
+
+  app.post("/api/ppc/upload/preview", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No Excel file uploaded." });
+      }
+      const buffer = req.file.buffer;
+      // We can run a dry run by processing in memory without committing if we want, or parse & return preview stats
+      const result = await processWorkbookBuffer(buffer, "Excel Upload Preview", req.body.currentUser || "Admin");
+      res.json({ success: true, preview: result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to parse uploaded Excel file." });
+    }
+  });
+
+  app.post("/api/ppc/upload/apply", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No Excel file uploaded." });
+      }
+      const buffer = req.file.buffer;
+      const result = await processWorkbookBuffer(buffer, "Excel Upload Apply", req.body.currentUser || "Admin");
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to apply uploaded Excel file." });
+    }
+  });
+
+  // Backward compatibility endpoint
   app.post("/api/sharepoint/auth", (req, res) => {
     const { email, name } = req.body;
     res.json({
@@ -28,10 +96,10 @@ async function startServer() {
   app.post("/api/sharepoint/sync", async (req, res) => {
     try {
       const { currentUser } = req.body;
-      const result = await syncSharePointPPC(currentUser);
+      const result = await syncGoogleSheetsPPC(currentUser);
       res.json(result);
     } catch (err: any) {
-      console.error("SharePoint sync failed:", err);
+      console.error("Sync failed:", err);
       res.status(500).json({ error: err.message || "Unknown error" });
     }
   });

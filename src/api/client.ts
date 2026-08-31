@@ -205,8 +205,37 @@ export const apiClient = {
     return store.applyAIRecommendation(queueRecordId, changedBy);
   },
 
-  syncPPCDataSource: async (currentUser: string): Promise<{ added: number; updated: number }> => {
-    return await prioritySourceService.syncWithStore(currentUser);
+  syncPPCDataSource: async (currentUser: string): Promise<any> => {
+    try {
+      const res = await fetch('/api/ppc/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentUser }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Sync failed with status ${res.status}`);
+      }
+      return await res.json();
+    } catch (err: any) {
+      console.warn("API sync failed, falling back to prioritySourceService:", err);
+      return await prioritySourceService.syncWithStore(currentUser);
+    }
+  },
+
+  uploadPPCExcel: async (file: File, currentUser: string): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('currentUser', currentUser);
+    const res = await fetch('/api/ppc/upload/apply', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Excel upload failed with status ${res.status}`);
+    }
+    return await res.json();
   },
 
   // --- PRODUCT MASTER VALIDATION & STARTER TEMPLATES ---

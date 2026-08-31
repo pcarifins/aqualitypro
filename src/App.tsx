@@ -150,6 +150,16 @@ export default function App() {
     setAuthenticatedUser(user);
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+      // Trigger automatic background Google Sheet sync on login once per session
+      const syncKey = `kra_auto_sync_${user.id}`;
+      if (!sessionStorage.getItem(syncKey)) {
+        sessionStorage.setItem(syncKey, 'true');
+        apiClient.syncPPCDataSource(user.name).then((res) => {
+          console.log("Auto login PPC sync completed:", res);
+        }).catch((err) => {
+          console.warn("Auto login PPC sync warning:", err);
+        });
+      }
     }
     setActiveTab(getDefaultTabForUser(user));
   };
@@ -167,6 +177,11 @@ export default function App() {
     setAuthenticatedUser(u);
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+      const syncKey = `kra_auto_sync_${u.id}`;
+      if (!sessionStorage.getItem(syncKey)) {
+        sessionStorage.setItem(syncKey, 'true');
+        apiClient.syncPPCDataSource(u.name).catch(() => {});
+      }
     }
     setActiveTab(getDefaultTabForUser(u));
   };
