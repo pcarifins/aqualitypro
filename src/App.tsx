@@ -11,7 +11,9 @@ import {
   CombinedJORecords,
   DashboardStats,
   TestingLine,
+  DataInitializationStatus,
 } from './types';
+import { firebaseConfig } from './lib/firebase';
 import { apiClient } from './api/client';
 import { store } from './data/storageEngine';
 import { Navbar } from './components/Navbar';
@@ -93,6 +95,17 @@ export default function App() {
     mechanicNGStats: [],
   });
 
+  const [initStatus, setInitStatus] = useState<DataInitializationStatus>({
+    firebaseProjectId: firebaseConfig.projectId || '',
+    firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || '(default)',
+    assemblersCount: 0,
+    checksheetTemplatesCount: 0,
+    checksheetsCount: 0,
+    lastSuccessfulSyncTime: null,
+    status: 'uninitialized',
+    subscriptionError: null,
+  });
+
   // Preloaded parameters for deep linking tabs
   const [preloadJONumber, setPreloadJONumber] = useState('');
   const [selectedJODetail, setSelectedJODetail] =
@@ -131,17 +144,58 @@ export default function App() {
   };
 
   useEffect(() => {
-    refreshData();
+    let active = true;
 
-    // Start realtime Firestore sync across all connected devices
-    store.initializeRealtimeSync();
+    async function initApp() {
+      setInitStatus((prev) => ({ ...prev, status: 'loading' }));
+      try {
+        // Start realtime Firestore sync across all connected devices
+        await store.initializeRealtimeSync();
 
-    // Subscribe to store updates for instant UI re-renders
+        // Subscribe to store updates for instant UI re-renders and refresh data after sync starts
+        await refreshData();
+
+        if (active) {
+          setInitStatus((prev) => ({
+            ...prev,
+            status: 'ready',
+            assemblersCount: store.getAssemblersCount(),
+            checksheetTemplatesCount: store.getChecksheetTemplatesCount(),
+            checksheetsCount: store.getChecksheetsCount(),
+            lastSuccessfulSyncTime: new Date().toLocaleTimeString(),
+            subscriptionError: null,
+          }));
+        }
+      } catch (err: any) {
+        console.error("Deterministic initialization failed:", err);
+        if (active) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          setInitStatus((prev) => ({
+            ...prev,
+            status: 'error',
+            subscriptionError: errorMsg,
+          }));
+        }
+      }
+    }
+
+    initApp();
+
     const unsubscribeStore = store.subscribe(() => {
       refreshData();
+      if (active) {
+        setInitStatus((prev) => ({
+          ...prev,
+          assemblersCount: store.getAssemblersCount(),
+          checksheetTemplatesCount: store.getChecksheetTemplatesCount(),
+          checksheetsCount: store.getChecksheetsCount(),
+          lastSuccessfulSyncTime: new Date().toLocaleTimeString(),
+        }));
+      }
     });
 
     return () => {
+      active = false;
       unsubscribeStore();
     };
   }, []);
@@ -360,6 +414,7 @@ export default function App() {
           <GLTForm
             currentUser={authenticatedUser}
             productModels={productModels}
+            checksheetTemplates={templates}
             getChecksheets={(cat) => apiClient.getChecksheetItems('GLT', cat)}
             onSaveRecord={handleSaveGLT}
             existingGLTRecords={
@@ -379,6 +434,8 @@ export default function App() {
         {activeTab === 'dyno' && permissions.canExecuteDynotest && (
           <DynotestForm
             currentUser={authenticatedUser}
+            productModels={productModels}
+            checksheetTemplates={templates}
             lookupJO={(jo, stage) => apiClient.lookupJO(jo, stage)}
             getChecksheets={() => apiClient.getChecksheetItems('Dynotest')}
             onSaveRecord={handleSaveDyno}
@@ -391,6 +448,8 @@ export default function App() {
         {activeTab === 'hydraulic' && permissions.canExecuteTestbench && (
           <TestbenchForm
             currentUser={authenticatedUser}
+            productModels={productModels}
+            checksheetTemplates={templates}
             lookupJO={(jo, stage) => apiClient.lookupJO(jo, stage)}
             getChecksheets={() => apiClient.getChecksheetItems('Hydraulic Test')}
             onSaveRecord={handleSaveHydraulic}

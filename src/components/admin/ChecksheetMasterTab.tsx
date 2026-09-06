@@ -7,6 +7,7 @@ import {
   TestProcess,
   TrialInputType,
   NumericValidationType,
+  ProductModel,
 } from '../../types';
 import {
   Layers,
@@ -36,6 +37,7 @@ import {
 
 interface ChecksheetMasterTabProps {
   templates: ChecksheetTemplate[];
+  productModels?: ProductModel[];
   onSaveTemplate: (template: ChecksheetTemplate) => Promise<void>;
   onActivateTemplate: (templateId: string) => Promise<void>;
   onCreateRevision: (templateId: string) => Promise<ChecksheetTemplate | null>;
@@ -45,6 +47,7 @@ interface ChecksheetMasterTabProps {
 
 export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
   templates,
+  productModels = [],
   onSaveTemplate,
   onActivateTemplate,
   onCreateRevision,
@@ -150,6 +153,7 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
       testStage: editingTemplateMeta.testStage || 'GLT',
       revision: editingTemplateMeta.revision || 1,
       status: editingTemplateMeta.status || 'DRAFT',
+      productMasterId: editingTemplateMeta.productMasterId,
       sections: editingTemplateMeta.sections || [
         {
           id: `sec-${Date.now()}-1`,
@@ -875,6 +879,43 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
                     <option value="Hydraulic Test">Hydraulic Test</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Link to Product Master Model (Optional - Auto-fills details)
+                </label>
+                <select
+                  value={editingTemplateMeta.productMasterId || ''}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const found = productModels.find((m) => m.id === selectedId);
+                    if (found) {
+                      setEditingTemplateMeta({
+                        ...editingTemplateMeta,
+                        productMasterId: found.id,
+                        component: found.component,
+                        unitModel: found.unitModel,
+                        compGroup: found.compGroup,
+                      });
+                    } else {
+                      setEditingTemplateMeta({
+                        ...editingTemplateMeta,
+                        productMasterId: '',
+                      });
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 focus:border-blue-500 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none"
+                >
+                  <option value="">-- Manual Configuration (No Link) --</option>
+                  {productModels
+                    .filter((m) => m.active)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        [{m.compGroup}] {m.unitModel} - {m.component}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2">

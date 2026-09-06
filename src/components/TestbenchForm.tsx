@@ -7,11 +7,14 @@ import {
   ChecksheetAnswer,
   QueueRecord,
   CompGroup,
+  ProductModel,
+  ChecksheetTemplate,
 } from '../types';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
+import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
 import {
   Search,
   Activity,
@@ -35,6 +38,8 @@ import { AITroubleshootingCard } from './AITroubleshootingCard';
 
 interface TestbenchFormProps {
   currentUser: User;
+  productModels: ProductModel[];
+  checksheetTemplates: ChecksheetTemplate[];
   lookupJO: (joNumber: string, stage: 'Hydraulic Test') => Promise<any>;
   getChecksheets: (process: 'Hydraulic Test') => Promise<ChecksheetItem[]>;
   onSaveRecord: (record: HydraulicRecord) => Promise<HydraulicRecord>;
@@ -44,6 +49,8 @@ interface TestbenchFormProps {
 
 export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   currentUser,
+  productModels,
+  checksheetTemplates,
   lookupJO,
   getChecksheets,
   onSaveRecord,
@@ -67,6 +74,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   const [plannedPriority, setPlannedPriority] = useState<number | undefined>(undefined);
   const [currentPriority, setCurrentPriority] = useState<number | undefined>(undefined);
   const [gltIncomingTime, setGltIncomingTime] = useState<string | null>(null);
+  const [latestGLTResult, setLatestGLTResult] = useState<string | null>(null);
 
   // Form State
   const [receivingTime, setReceivingTime] = useState<string | null>(null);
@@ -97,9 +105,41 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       });
       setQueueRecords(eligible);
     });
-
-    getChecksheets('Hydraulic Test').then((items) => setChecksheetItems(items));
   }, []);
+
+  // Load checksheet items based on component / unitModel / productModels / checksheetTemplates
+  useEffect(() => {
+    if (!component || !unitModel) {
+      getChecksheets('Hydraulic Test').then((items) => setChecksheetItems(items));
+      return;
+    }
+
+    const product = findMatchingProduct(productModels, component, unitModel);
+    if (!product) {
+      setChecksheetItems([]);
+      return;
+    }
+
+    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Testbench');
+
+    if (activeTemplates.length > 0) {
+      const matchedTmpl = activeTemplates[0];
+      const items: ChecksheetItem[] = [];
+      matchedTmpl.sections.forEach((sec) => {
+        sec.items.forEach((item) => {
+          items.push({
+            ...item,
+            section: sec.name,
+            templateId: matchedTmpl.id,
+            process: 'Testbench',
+          });
+        });
+      });
+      setChecksheetItems(items);
+    } else {
+      setChecksheetItems([]);
+    }
+  }, [component, unitModel, productModels, checksheetTemplates]);
 
   useEffect(() => {
     if (preloadJONumber) {
@@ -125,6 +165,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     setCurrentPriority(record.currentPriority);
     setAssemblyMechanic(record.assemblyMechanic || 'Assembler');
     setAttemptNumber(record.testType === 'RETEST' ? 2 : 1);
+    setLatestGLTResult(record.gltStatus || null);
 
     setIsLockedFromQueue(true);
 
@@ -155,14 +196,28 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
           setProductModel(res.productModel || '');
           setAssemblyMechanic(res.assemblyMechanic || '');
           setGltIncomingTime(res.gltIncomingTime || null);
+          setLatestGLTResult(res.latestGLTResult || null);
+        } else {
+          setLatestGLTResult(null);
         }
       });
     }
   };
 
   const handleReceiveAtTestbench = async () => {
+    if (testType === 'PROD') {
+      if (!latestGLTResult) {
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        return;
+      }
+      if (latestGLTResult !== 'GOOD') {
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        return;
+      }
+    }
     const nowIso = new Date().toISOString();
     setReceivingTime(nowIso);
+    setValidationError(null);
     if (joNumber) {
       await store.updateQueueRecordByJONumber(joNumber, {
         receivingTime: nowIso,
@@ -241,6 +296,18 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       setValidationError('Please select or search a valid Component JO Number first.');
       return false;
     }
+
+    if (testType === 'PROD') {
+      if (!latestGLTResult) {
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        return false;
+      }
+      if (latestGLTResult !== 'GOOD') {
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        return false;
+      }
+    }
+
     if (!receivingTime) {
       setValidationError('Receive at Testbench');
       return false;
@@ -622,7 +689,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
           </div>
           <h4 className="text-sm font-bold text-amber-900">Checksheet Not Configured</h4>
           <p className="text-xs text-amber-800 max-w-md mx-auto">
-            No active Testbench checksheet is configured for: <strong>{compGroup} / {unitModel} {component}</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
+            No active checksheet is configured for: <strong>{component} – {unitModel} in Testbench</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
           </p>
         </div>
       ) : !receivingTime ? (

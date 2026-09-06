@@ -38,6 +38,8 @@ import { INITIAL_REQUIRED_PRODUCT_MODELS } from './productMasterSeed';
 import { initialQueueRecords } from './initialQueueData';
 import { initialTestingLines } from './initialTestingLines';
 import { computeUnifiedAnalytics } from '../services/analyticsService';
+import { normalizeString } from '../utils/normalization';
+import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
 
 import {
   saveDocument,
@@ -46,6 +48,7 @@ import {
   logAuditEvent,
   initializeAndMigrateFirestore,
   sanitizeFirestoreValue,
+  testFirestoreConnection,
 } from '../lib/firestoreSync';
 
 const STORAGE_KEYS = {
@@ -95,6 +98,7 @@ class DataStore {
 
   private listeners: (() => void)[] = [];
   private isInitialized = false;
+  private isInitializedFinished = false;
   private unsubscribeFuncs: (() => void)[] = [];
 
   constructor() {
@@ -117,154 +121,187 @@ class DataStore {
   public async initializeRealtimeSync(): Promise<void> {
     if (this.isInitialized) return;
     this.isInitialized = true;
+    this.isInitializedFinished = false;
 
-    // 1. One-time migration if needed
+    // 1. Connection check
+    const conn = await testFirestoreConnection();
+    if (!conn.connected) {
+      console.warn("Firestore connection check failed. Operating in offline/cached fallback mode: ", conn.message);
+      // We will allow the app to initialize with cached local state
+      this.isInitializedFinished = true;
+      this.notifyListeners();
+      return;
+    }
+
+    // 2. Perform self-healing master-data audit and recovery
     await initializeAndMigrateFirestore();
 
-    // 2. Set up realtime listeners for all collections
-    const unSubUsers = subscribeToCollection<User>('users', (data) => {
-      if (data) {
-        this.users = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
+    // Set up helper to resolve on first snapshot
+    const subscribeAndResolve = <T>(
+      collectionName: string,
+      callback: (data: T[]) => void
+    ): Promise<() => void> => {
+      return new Promise((resolve, reject) => {
+        let isFirst = true;
+        const unsub = subscribeToCollection<T>(
+          collectionName,
+          (data) => {
+            callback(data);
+            if (isFirst) {
+              isFirst = false;
+              resolve(unsub);
+            }
+          },
+          (err) => {
+            console.error(`First load of ${collectionName} failed:`, err);
+            if (isFirst) {
+              isFirst = false;
+              reject(err);
+            }
+          }
+        );
+      });
+    };
 
-    const unSubAssemblers = subscribeToCollection<Assembler>('assemblers', (data) => {
-      if (data) {
-        this.assemblers = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
+    try {
+      const results = await Promise.all([
+        subscribeAndResolve<User>('users', (data) => {
+          if (data && (data.length > 0 || this.isInitializedFinished)) {
+            this.users = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<Assembler>('assemblers', (data) => {
+          if (data && (data.length > 0 || this.isInitializedFinished)) {
+            this.assemblers = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<ProductModel>('productModels', (data) => {
+          if (data && (data.length > 0 || this.isInitializedFinished)) {
+            this.models = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<ChecksheetTemplate>('checksheetTemplates', (data) => {
+          if (data && (data.length > 0 || this.isInitializedFinished)) {
+            this.templates = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<ChecksheetItem>('checksheets', (data) => {
+          if (data && (data.length > 0 || this.isInitializedFinished)) {
+            this.checksheets = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<QueueRecord>('priorityQueue', async (data) => {
+          if (data) {
+            const mapped = data.map((q) => ({
+              ...q,
+              queueRecordId: q.queueRecordId || (q as any).id,
+            }));
+            const updated = await this.ensureTestingLineAssignments(mapped);
+            if (!updated) {
+              this.queueRecords = mapped;
+              this.normalizeQueuePriorities();
+              this.saveToStorageCache();
+              this.notifyListeners();
+            }
+          }
+        }),
+        subscribeAndResolve<TestingLine>('testingLines', (data) => {
+          if (data && data.length > 0) {
+            this.testingLines = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          } else if (data && data.length === 0) {
+            this.testingLines = [...initialTestingLines];
+            this.testingLines.forEach((tl) => saveDocument('testingLines', tl));
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<GLTRecord>('gltRecords', (data) => {
+          if (data) {
+            this.gltRecords = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<DynotestRecord>('dynoRecords', (data) => {
+          if (data) {
+            this.dynoRecords = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<HydraulicRecord>('hydraulicRecords', (data) => {
+          if (data) {
+            this.hydraulicRecords = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<PDFTestReportRecord>('pdfReports', (data) => {
+          if (data) {
+            this.pdfReports = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<QualityCertificateRecord>('certificates', (data) => {
+          if (data) {
+            this.certificates = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<any>('auditLogs', (data) => {
+          if (data) {
+            this.auditLogs = data;
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<TestOverride>('testOverrides', (data) => {
+          if (data) {
+            this.testOverrides = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        })
+      ]);
 
-    const unSubModels = subscribeToCollection<ProductModel>('productModels', (data) => {
-      if (data) {
-        this.models = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
+      this.unsubscribeFuncs = results;
+      this.isInitializedFinished = true;
+      this.notifyListeners();
+    } catch (err) {
+      console.error("Error during deterministic realtime sync subscription:", err);
+      this.isInitialized = false;
+      this.isInitializedFinished = true;
+      throw err;
+    }
+  }
 
-    const unSubTemplates = subscribeToCollection<ChecksheetTemplate>('checksheetTemplates', (data) => {
-      if (data) {
-        this.templates = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
+  public getIsInitialized(): boolean {
+    return this.isInitialized;
+  }
 
-    const unSubChecksheets = subscribeToCollection<ChecksheetItem>('checksheets', (data) => {
-      if (data) {
-        this.checksheets = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
+  public getAssemblersCount(): number {
+    return this.assemblers.length;
+  }
 
-    const unSubQueue = subscribeToCollection<QueueRecord>('priorityQueue', async (data) => {
-      if (data) {
-        // preserve field fallback
-        const mapped = data.map((q) => ({
-          ...q,
-          queueRecordId: q.queueRecordId || (q as any).id,
-        }));
-        
-        const updated = await this.ensureTestingLineAssignments(mapped);
-        if (!updated) {
-          this.queueRecords = mapped;
-          this.normalizeQueuePriorities();
-          this.saveToStorageCache();
-          this.notifyListeners();
-        }
-      }
-    });
+  public getChecksheetTemplatesCount(): number {
+    return this.templates.length;
+  }
 
-    const unSubTestingLines = subscribeToCollection<TestingLine>('testingLines', (data) => {
-      if (data && data.length > 0) {
-        this.testingLines = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      } else if (data && data.length === 0) {
-        // seed testing lines to firestore if empty
-        this.testingLines = [...initialTestingLines];
-        this.testingLines.forEach((tl) => saveDocument('testingLines', tl));
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubGLT = subscribeToCollection<GLTRecord>('gltRecords', (data) => {
-      if (data) {
-        this.gltRecords = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubDyno = subscribeToCollection<DynotestRecord>('dynoRecords', (data) => {
-      if (data) {
-        this.dynoRecords = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubHydraulic = subscribeToCollection<HydraulicRecord>('hydraulicRecords', (data) => {
-      if (data) {
-        this.hydraulicRecords = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubReports = subscribeToCollection<PDFTestReportRecord>('pdfReports', (data) => {
-      if (data) {
-        this.pdfReports = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubCertificates = subscribeToCollection<QualityCertificateRecord>('certificates', (data) => {
-      if (data) {
-        this.certificates = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    const unSubAudit = subscribeToCollection<any>('auditLogs', (data) => {
-      if (data) {
-        this.auditLogs = data;
-        this.notifyListeners();
-      }
-    });
-
-    const unSubOverrides = subscribeToCollection<TestOverride>('testOverrides', (data) => {
-      if (data) {
-        this.testOverrides = data;
-        this.saveToStorageCache();
-        this.notifyListeners();
-      }
-    });
-
-    this.unsubscribeFuncs = [
-      unSubUsers,
-      unSubAssemblers,
-      unSubModels,
-      unSubTemplates,
-      unSubChecksheets,
-      unSubQueue,
-      unSubTestingLines,
-      unSubGLT,
-      unSubDyno,
-      unSubHydraulic,
-      unSubReports,
-      unSubCertificates,
-      unSubAudit,
-      unSubOverrides,
-    ];
+  public getChecksheetsCount(): number {
+    return this.checksheets.length;
   }
 
   public cleanupSync() {
@@ -727,37 +764,11 @@ class DataStore {
     component: string,
     testStage: TestProcess
   ): ChecksheetTemplate | null {
-    const compKey = (component || '').trim().toLowerCase();
-    const unitKey = (unitModel || '').trim().toUpperCase();
+    const product = findMatchingProduct(this.models, component, unitModel);
+    if (!product) return null;
 
-    const exactMatch = this.templates.find(
-      (t) =>
-        t.status === 'ACTIVE' &&
-        t.testStage === testStage &&
-        t.component.trim().toLowerCase() === compKey &&
-        t.unitModel.trim().toUpperCase() === unitKey
-    );
-    if (exactMatch) return exactMatch;
-
-    const allUnitMatch = this.templates.find(
-      (t) =>
-        t.status === 'ACTIVE' &&
-        t.testStage === testStage &&
-        t.component.trim().toLowerCase() === compKey &&
-        (t.unitModel === 'ALL' || !t.unitModel)
-    );
-    if (allUnitMatch) return allUnitMatch;
-
-    const compGroupMatch = this.templates.find(
-      (t) =>
-        t.status === 'ACTIVE' &&
-        t.testStage === testStage &&
-        (t.compGroup === compGroup ||
-          (compGroup.includes('Engine') && t.compGroup === 'Engine') ||
-          (compGroup.includes('PT') && t.compGroup === 'PT-PPM') ||
-          (compGroup.includes('Cylinder') && t.compGroup === 'Cylinder'))
-    );
-    return compGroupMatch || null;
+    const compatibles = getCompatibleTemplates(this.templates, product, testStage);
+    return compatibles.length > 0 ? compatibles[0] : null;
   }
 
   public createSnapshotFromTemplate(template: ChecksheetTemplate): ChecksheetSnapshot {
@@ -798,6 +809,13 @@ class DataStore {
   }
 
   public async saveChecksheetTemplate(template: ChecksheetTemplate, actorName = 'Admin'): Promise<void> {
+    if (!template.productMasterId && template.component && template.unitModel) {
+      const matched = findMatchingProduct(this.models, template.component, template.unitModel);
+      if (matched) {
+        template.productMasterId = matched.id;
+      }
+    }
+
     const idx = this.templates.findIndex((t) => t.id === template.id);
     template.updatedAt = new Date().toISOString();
     if (idx >= 0) {

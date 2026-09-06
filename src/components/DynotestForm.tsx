@@ -7,11 +7,14 @@ import {
   ChecksheetAnswer,
   QueueRecord,
   CompGroup,
+  ProductModel,
+  ChecksheetTemplate,
 } from '../types';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
+import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
 import {
   Search,
   Gauge,
@@ -36,6 +39,8 @@ import { AITroubleshootingCard } from './AITroubleshootingCard';
 
 interface DynotestFormProps {
   currentUser: User;
+  productModels: ProductModel[];
+  checksheetTemplates: ChecksheetTemplate[];
   lookupJO: (joNumber: string, stage: 'Dynotest') => Promise<any>;
   getChecksheets: (process: 'Dynotest') => Promise<ChecksheetItem[]>;
   onSaveRecord: (record: DynotestRecord) => Promise<DynotestRecord>;
@@ -45,6 +50,8 @@ interface DynotestFormProps {
 
 export const DynotestForm: React.FC<DynotestFormProps> = ({
   currentUser,
+  productModels,
+  checksheetTemplates,
   lookupJO,
   getChecksheets,
   onSaveRecord,
@@ -67,6 +74,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
   const [plannedPriority, setPlannedPriority] = useState<number | undefined>(undefined);
   const [currentPriority, setCurrentPriority] = useState<number | undefined>(undefined);
   const [gltIncomingTime, setGltIncomingTime] = useState<string | null>(null);
+  const [latestGLTResult, setLatestGLTResult] = useState<string | null>(null);
 
   // Form State
   const [receivingTime, setReceivingTime] = useState<string | null>(null);
@@ -99,9 +107,41 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       });
       setQueueRecords(engineEligible);
     });
-
-    getChecksheets('Dynotest').then((items) => setChecksheetItems(items));
   }, []);
+
+  // Load checksheet items based on component / unitModel / productModels / checksheetTemplates
+  useEffect(() => {
+    if (!component || !unitModel) {
+      getChecksheets('Dynotest').then((items) => setChecksheetItems(items));
+      return;
+    }
+
+    const product = findMatchingProduct(productModels, component, unitModel);
+    if (!product) {
+      setChecksheetItems([]);
+      return;
+    }
+
+    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Dynotest');
+
+    if (activeTemplates.length > 0) {
+      const matchedTmpl = activeTemplates[0];
+      const items: ChecksheetItem[] = [];
+      matchedTmpl.sections.forEach((sec) => {
+        sec.items.forEach((item) => {
+          items.push({
+            ...item,
+            section: sec.name,
+            templateId: matchedTmpl.id,
+            process: 'Dynotest',
+          });
+        });
+      });
+      setChecksheetItems(items);
+    } else {
+      setChecksheetItems([]);
+    }
+  }, [component, unitModel, productModels, checksheetTemplates]);
 
   // Preload JO if passed
   useEffect(() => {
@@ -127,6 +167,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     setCurrentPriority(record.currentPriority);
     setAssemblyMechanic(record.assemblyMechanic || 'Assembler');
     setAttemptNumber(record.testType === 'RETEST' ? 2 : 1);
+    setLatestGLTResult(record.gltStatus || null);
 
     setIsLockedFromQueue(true);
 
@@ -157,14 +198,28 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
           setProductModel(res.productModel || '');
           setAssemblyMechanic(res.assemblyMechanic || '');
           setGltIncomingTime(res.gltIncomingTime || null);
+          setLatestGLTResult(res.latestGLTResult || null);
+        } else {
+          setLatestGLTResult(null);
         }
       });
     }
   };
 
   const handleReceiveAtDynotest = async () => {
+    if (testType === 'PROD') {
+      if (!latestGLTResult) {
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        return;
+      }
+      if (latestGLTResult !== 'GOOD') {
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        return;
+      }
+    }
     const nowIso = new Date().toISOString();
     setReceivingTime(nowIso);
+    setValidationError(null);
     if (joNumber) {
       await store.updateQueueRecordByJONumber(joNumber, {
         receivingTime: nowIso,
@@ -244,6 +299,18 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       setValidationError('Please select or search a valid Engine JO Number first.');
       return false;
     }
+
+    if (testType === 'PROD') {
+      if (!latestGLTResult) {
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        return false;
+      }
+      if (latestGLTResult !== 'GOOD') {
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        return false;
+      }
+    }
+
     if (!receivingTime) {
       setValidationError('Receive at Dynotest');
       return false;
@@ -613,7 +680,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
           </div>
           <h4 className="text-sm font-bold text-amber-900">Checksheet Not Configured</h4>
           <p className="text-xs text-amber-800 max-w-md mx-auto">
-            No active Dynotest checksheet is configured for: <strong>{unitModel || 'Engine'} {component}</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
+            No active checksheet is configured for: <strong>{component} – {unitModel} in Dynotest</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
           </p>
         </div>
       ) : !receivingTime ? (

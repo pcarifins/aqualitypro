@@ -10,11 +10,13 @@ import {
   Assembler,
   QueueRecord,
   CompGroup,
+  ChecksheetTemplate,
 } from '../types';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
+import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
 import {
   Save,
   CheckCircle2,
@@ -36,6 +38,7 @@ import { AITroubleshootingCard } from './AITroubleshootingCard';
 interface GLTFormProps {
   currentUser: User;
   productModels: ProductModel[];
+  checksheetTemplates: ChecksheetTemplate[];
   getChecksheets: (category: ProductCategory) => Promise<ChecksheetItem[]>;
   onSaveRecord: (record: GLTRecord) => Promise<GLTRecord>;
   existingGLTRecords?: GLTRecord[];
@@ -46,6 +49,7 @@ interface GLTFormProps {
 export const GLTForm: React.FC<GLTFormProps> = ({
   currentUser,
   productModels,
+  checksheetTemplates,
   getChecksheets,
   onSaveRecord,
   existingGLTRecords = [],
@@ -125,12 +129,41 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     }
   }, [preloadJONumber]);
 
-  // Load checksheet items based on category / compGroup
+  // Load checksheet items based on category / compGroup / component / unitModel
   useEffect(() => {
-    getChecksheets(productCategory).then((items) => {
+    if (!component || !unitModel) {
+      getChecksheets(productCategory).then((items) => {
+        setChecksheetItems(items);
+      });
+      return;
+    }
+
+    const product = findMatchingProduct(productModels, component, unitModel);
+    if (!product) {
+      setChecksheetItems([]);
+      return;
+    }
+
+    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'GLT');
+
+    if (activeTemplates.length > 0) {
+      const matchedTmpl = activeTemplates[0];
+      const items: ChecksheetItem[] = [];
+      matchedTmpl.sections.forEach((sec) => {
+        sec.items.forEach((item) => {
+          items.push({
+            ...item,
+            section: sec.name,
+            templateId: matchedTmpl.id,
+            process: 'GLT',
+          });
+        });
+      });
       setChecksheetItems(items);
-    });
-  }, [productCategory]);
+    } else {
+      setChecksheetItems([]);
+    }
+  }, [component, unitModel, productCategory, productModels, checksheetTemplates]);
 
   const handleSelectQueueItem = (qId: string) => {
     setSelectedQueueId(qId);
@@ -659,28 +692,18 @@ export const GLTForm: React.FC<GLTFormProps> = ({
             <label className="block text-[11px] font-bold text-slate-600 mb-1">
               Assembly Mechanic <span className="text-rose-500">*</span>
             </label>
-            {assemblersList.length > 0 ? (
-              <select
-                value={assemblyMechanic}
-                onChange={(e) => setAssemblyMechanic(e.target.value)}
-                className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">-- Select Assembly Mechanic ({compGroup}) --</option>
-                {filterAssemblersByCompGroup(assemblersList, compGroup).map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.name} ({a.section || a.jobGroup || 'Mechanic'})
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="text"
-                placeholder="Mechanic name"
-                value={assemblyMechanic}
-                onChange={(e) => setAssemblyMechanic(e.target.value)}
-                className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-xs font-semibold"
-              />
-            )}
+            <select
+              value={assemblyMechanic}
+              onChange={(e) => setAssemblyMechanic(e.target.value)}
+              className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Select Assembly Mechanic ({compGroup}) --</option>
+              {filterAssemblersByCompGroup(assemblersList, compGroup).map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name} ({a.section || a.jobGroup || 'Mechanic'})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         {/* Receive at GLT / Start Lead-Time */}
@@ -753,6 +776,16 @@ export const GLTForm: React.FC<GLTFormProps> = ({
           <div className="text-[11px] font-bold text-blue-700">
             Inspection Checklist Locked
           </div>
+        </div>
+      ) : checksheetItems.filter((i) => i.active !== false).length === 0 ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-2">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto font-bold text-lg">
+            !
+          </div>
+          <h4 className="text-sm font-bold text-amber-900">Checksheet Not Configured</h4>
+          <p className="text-xs text-amber-800 max-w-md mx-auto">
+            No active checksheet is configured for: <strong>{component} – {unitModel} in GLT</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
+          </p>
         </div>
       ) : (
         <>

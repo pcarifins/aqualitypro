@@ -915,6 +915,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             {activeTab === 'checksheet' && isAdmin && (
               <ChecksheetMasterTab
                 templates={templates}
+                productModels={productModels}
                 onSaveTemplate={onSaveTemplate}
                 onActivateTemplate={onActivateTemplate}
                 onCreateRevision={onCreateRevision}

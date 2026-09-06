@@ -7,7 +7,7 @@ import {
   deleteDoc,
   onSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import {
   initialUsers,
   initialAssemblers,
@@ -20,6 +20,54 @@ import {
 } from '../data/initialData';
 import { INITIAL_REQUIRED_PRODUCT_MODELS } from '../data/productMasterSeed';
 import { initialQueueRecords } from '../data/initialQueueData';
+import { initialTestingLines } from '../data/initialTestingLines';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null,
+      emailVerified: auth.currentUser?.emailVerified || null,
+      isAnonymous: auth.currentUser?.isAnonymous || null,
+      tenantId: auth.currentUser?.tenantId || null,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export function sanitizeFirestoreValue(value: any): any {
   if (value === undefined) {
@@ -66,8 +114,7 @@ export async function fetchCollection<T>(collectionName: string): Promise<T[]> {
     });
     return items;
   } catch (error) {
-    console.error(`Error fetching collection ${collectionName}:`, error);
-    return [];
+    handleFirestoreError(error, OperationType.GET, collectionName);
   }
 }
 
@@ -81,14 +128,22 @@ export async function saveDocument<
     );
   }
   const cleanData = sanitizeFirestoreValue(data);
-  await setDoc(doc(db, collectionName, docId), cleanData, { merge: true });
+  try {
+    await setDoc(doc(db, collectionName, docId), cleanData, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${docId}`);
+  }
 }
 
 export async function removeDocument(
   collectionName: string,
   id: string
 ): Promise<void> {
-  await deleteDoc(doc(db, collectionName, id));
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
+  }
 }
 
 export function subscribeToCollection<T>(
@@ -107,7 +162,11 @@ export function subscribeToCollection<T>(
     },
     (error) => {
       console.error(`Error subscribing to ${collectionName}:`, error);
-      if (onError) onError(error);
+      if (onError) {
+        onError(error);
+      } else {
+        handleFirestoreError(error, OperationType.GET, collectionName);
+      }
     }
   );
 }
@@ -173,30 +232,23 @@ export async function logAuditEvent(event: {
   }
 }
 
-// Check and perform one-time migration to Firestore
+// Perform self-healing idempotent audit and restoration of all required Firestore master data
 export async function initializeAndMigrateFirestore(): Promise<{
   migrated: boolean;
   message: string;
 }> {
   try {
-    const migrationDocRef = doc(db, 'systemConfig', 'databaseMigration');
-    const migrationSnap = await getDoc(migrationDocRef);
-
-    if (migrationSnap.exists() && migrationSnap.data()?.completed === true) {
-      return {
-        migrated: false,
-        message: 'Firestore database is already initialized and up to date.',
-      };
-    }
-
-    console.log('Starting one-time migration of local/seed data to Firestore...');
+    console.log('Auditing Firestore master data collections...');
+    let restoredCount = 0;
 
     // 1. Users
     const existingUsers = await fetchCollection<any>('users');
     const existingUserIds = new Set(existingUsers.map((u) => u.id));
     for (const u of initialUsers) {
       if (!existingUserIds.has(u.id)) {
+        console.log(`Restoring missing initial user: ${u.username}`);
         await saveDocument('users', u);
+        restoredCount++;
       }
     }
 
@@ -205,7 +257,9 @@ export async function initializeAndMigrateFirestore(): Promise<{
     const existingAssemblerIds = new Set(existingAssemblers.map((a) => a.id));
     for (const a of initialAssemblers) {
       if (!existingAssemblerIds.has(a.id)) {
+        console.log(`Restoring missing initial assembler: ${a.name}`);
         await saveDocument('assemblers', a);
+        restoredCount++;
       }
     }
 
@@ -215,7 +269,9 @@ export async function initializeAndMigrateFirestore(): Promise<{
     const allModels = [...initialProductModels, ...INITIAL_REQUIRED_PRODUCT_MODELS];
     for (const m of allModels) {
       if (!existingModelIds.has(m.id)) {
+        console.log(`Restoring missing required product model: ${m.modelName}`);
         await saveDocument('productModels', m);
+        restoredCount++;
       }
     }
 
@@ -224,7 +280,9 @@ export async function initializeAndMigrateFirestore(): Promise<{
     const existingTemplateIds = new Set(existingTemplates.map((t) => t.id));
     for (const t of initialChecksheetTemplates) {
       if (!existingTemplateIds.has(t.id)) {
+        console.log(`Restoring missing checksheet template: ${t.name}`);
         await saveDocument('checksheetTemplates', t);
+        restoredCount++;
       }
     }
 
@@ -233,64 +291,88 @@ export async function initializeAndMigrateFirestore(): Promise<{
     const existingChecksheetIds = new Set(existingChecksheets.map((c) => c.id));
     for (const c of initialChecksheetItems) {
       if (!existingChecksheetIds.has(c.id)) {
+        console.log(`Restoring missing checksheet item: ${c.itemName}`);
         await saveDocument('checksheets', c);
+        restoredCount++;
       }
     }
 
     // 6. Queue Records
     const existingQueue = await fetchCollection<any>('priorityQueue');
-    const existingQueueIds = new Set(existingQueue.map((q) => q.queueRecordId));
+    const existingQueueIds = new Set(existingQueue.map((q) => q.queueRecordId || (q as any).id));
     for (const q of initialQueueRecords) {
-      if (!existingQueueIds.has(q.queueRecordId)) {
+      const qId = q.queueRecordId || (q as any).id;
+      if (!existingQueueIds.has(qId)) {
+        console.log(`Restoring missing queue record: ${q.joRoNumber}`);
         await saveDocument('priorityQueue', q);
+        restoredCount++;
       }
     }
 
-    // 7. GLT Records
+    // 7. Testing Lines
+    const existingTestingLines = await fetchCollection<any>('testingLines');
+    const existingTestingLineIds = new Set(existingTestingLines.map((tl) => tl.id));
+    for (const tl of initialTestingLines) {
+      if (!existingTestingLineIds.has(tl.id)) {
+        console.log(`Restoring missing testing line: ${tl.name}`);
+        await saveDocument('testingLines', tl);
+        restoredCount++;
+      }
+    }
+
+    // 8. GLT Records
     const existingGLT = await fetchCollection<any>('gltRecords');
     const existingGLTIds = new Set(existingGLT.map((g) => g.id));
     for (const g of initialGLTRecords) {
       if (!existingGLTIds.has(g.id)) {
+        console.log(`Restoring missing GLT record: ${g.joNumber}`);
         await saveDocument('gltRecords', g);
+        restoredCount++;
       }
     }
 
-    // 8. Dyno Records
+    // 9. Dyno Records
     const existingDyno = await fetchCollection<any>('dynoRecords');
     const existingDynoIds = new Set(existingDyno.map((d) => d.id));
     for (const d of initialDynotestRecords) {
       if (!existingDynoIds.has(d.id)) {
+        console.log(`Restoring missing Dyno record: ${d.joNumber}`);
         await saveDocument('dynoRecords', d);
+        restoredCount++;
       }
     }
 
-    // 9. Hydraulic Records
+    // 10. Hydraulic Records
     const existingHyd = await fetchCollection<any>('hydraulicRecords');
     const existingHydIds = new Set(existingHyd.map((h) => h.id));
     for (const h of initialHydraulicRecords) {
       if (!existingHydIds.has(h.id)) {
+        console.log(`Restoring missing hydraulic record: ${h.joNumber}`);
         await saveDocument('hydraulicRecords', h);
+        restoredCount++;
       }
     }
 
-    // Mark migration completed in Firestore
+    // Mark migration completed / audited in Firestore
+    const migrationDocRef = doc(db, 'systemConfig', 'databaseMigration');
     await setDoc(migrationDocRef, {
-      version: 'firestore-first-v1',
+      version: 'firestore-first-v2',
       completed: true,
       completedAt: new Date().toISOString(),
-      migratedBy: 'auto-migration-engine',
+      migratedBy: 'idempotent-audit-and-recovery-engine',
+      lastAuditRestoredCount: restoredCount,
     });
 
-    console.log('One-time Firestore migration successfully completed.');
+    console.log(`Idempotent Firestore audit/migration completed. Restored ${restoredCount} records.`);
     return {
-      migrated: true,
-      message: 'Database migration to Cloud Firestore successfully completed.',
+      migrated: restoredCount > 0,
+      message: `Database audited. Restored ${restoredCount} missing records.`,
     };
   } catch (error: any) {
-    console.error('Migration to Firestore failed:', error);
+    console.error('Audit and migration to Firestore failed:', error);
     return {
       migrated: false,
-      message: `Migration failed: ${error?.message || 'Unknown error'}`,
+      message: `Audit/migration failed: ${error?.message || 'Unknown error'}`,
     };
   }
 }

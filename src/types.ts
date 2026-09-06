@@ -475,3 +475,14 @@ export interface DashboardStats {
     ngRatio: number;
   }[];
 }
+
+export interface DataInitializationStatus {
+  firebaseProjectId: string;
+  firestoreDatabaseId: string;
+  assemblersCount: number;
+  checksheetTemplatesCount: number;
+  checksheetsCount: number;
+  lastSuccessfulSyncTime: string | null;
+  status: 'uninitialized' | 'loading' | 'ready' | 'error';
+  subscriptionError: string | null;
+}

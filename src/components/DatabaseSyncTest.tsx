@@ -21,8 +21,12 @@ import {
   Trash2,
   AlertCircle,
   Clock,
+  Users,
+  Layers,
+  FileText,
 } from 'lucide-react';
 import { firebaseConfig } from '../lib/firebase';
+import { store } from '../data/storageEngine';
 
 interface DatabaseSyncTestProps {
   currentUser: User;
@@ -274,6 +278,54 @@ export const DatabaseSyncTest: React.FC<DatabaseSyncTestProps> = ({ currentUser 
           </div>
           <div className={`text-xs font-mono font-bold truncate ${lastSyncError ? 'text-rose-600' : 'text-emerald-600'}`}>
             {lastSyncError || 'None (0 errors)'}
+          </div>
+        </div>
+      </div>
+
+      {/* Firestore Master Data Hydration Metrics */}
+      <div className="space-y-2">
+        <div className="text-[10px] font-black tracking-widest text-slate-400 uppercase">
+          Firestore Master Data Hydration Metrics (Realtime counts)
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+            <div className="flex items-center space-x-1.5 text-slate-500 text-[10px] uppercase font-bold">
+              <Activity className="w-3.5 h-3.5 text-blue-500" />
+              <span>Initialization Status</span>
+            </div>
+            <div className={`text-xs font-bold ${store.getIsInitialized() ? 'text-emerald-600' : 'text-amber-600 animate-pulse'}`}>
+              {store.getIsInitialized() ? 'DETERMINISTIC & ACTIVE' : 'HYDRATING...'}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+            <div className="flex items-center space-x-1.5 text-slate-500 text-[10px] uppercase font-bold">
+              <Users className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Assemblers Master</span>
+            </div>
+            <div className="text-xs font-bold text-slate-800">
+              {store.getAssemblersCount()} Documents
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+            <div className="flex items-center space-x-1.5 text-slate-500 text-[10px] uppercase font-bold">
+              <Layers className="w-3.5 h-3.5 text-pink-500" />
+              <span>Checksheet Templates</span>
+            </div>
+            <div className="text-xs font-bold text-slate-800">
+              {store.getChecksheetTemplatesCount()} Documents
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1">
+            <div className="flex items-center space-x-1.5 text-slate-500 text-[10px] uppercase font-bold">
+              <FileText className="w-3.5 h-3.5 text-amber-500" />
+              <span>Checksheet Items</span>
+            </div>
+            <div className="text-xs font-bold text-slate-800">
+              {store.getChecksheetsCount()} Documents
+            </div>
           </div>
         </div>
       </div>

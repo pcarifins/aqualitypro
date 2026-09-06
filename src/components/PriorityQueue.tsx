@@ -77,6 +77,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [newSerialNumber, setNewSerialNumber] = useState('');
   const [newMechanic, setNewMechanic] = useState('');
   const [newIsUrgent, setNewIsUrgent] = useState(false);
+  const [assemblersList, setAssemblersList] = useState<any[]>([]);
 
   const roleUpper = (currentUserRole || '').toUpperCase();
   const canReorder = roleUpper === 'PPC' || roleUpper === 'SUPERVISOR' || roleUpper === 'ADMIN';
@@ -103,11 +104,21 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     setTestOverrides(overrides || []);
   };
 
+  const loadAssemblers = async () => {
+    try {
+      const asms = await apiClient.getAssemblers(true);
+      setAssemblersList(asms || []);
+    } catch (err) {
+      console.error('Failed to load assemblers:', err);
+    }
+  };
+
   useEffect(() => {
     loadQueue();
     loadProductModels();
     loadTestingLines();
     loadTestOverrides();
+    loadAssemblers();
 
     const unsubscribe = store.subscribe(() => {
       loadQueue();
@@ -132,6 +143,16 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       await loadQueue();
     } catch (err) {
       console.error('Failed to update testing line assignment:', err);
+    }
+  };
+
+  const handleAssignMechanic = async (queueRecordId: string, assemblyMechanic: string) => {
+    try {
+      const { store } = await import('../data/storageEngine');
+      await store.updateQueueRecord(queueRecordId, { assemblyMechanic });
+      await loadQueue();
+    } catch (err) {
+      console.error('Failed to update assembly mechanic:', err);
     }
   };
 
@@ -594,6 +615,12 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                 (l) => l.active && (l.componentGroup === selectedCompGroup || !l.componentGroup)
               );
 
+              const filteredLines = item.testType === 'PROD'
+                ? (item.gltStatus === 'GOOD'
+                  ? activeLinesForGroup.filter((l) => l.process !== 'GLT')
+                  : activeLinesForGroup.filter((l) => l.process === 'GLT'))
+                : activeLinesForGroup;
+
               return (
                 <div
                   key={item.queueRecordId}
@@ -676,14 +703,14 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                         {/* Testing Line Selector */}
                         <div className="flex items-center space-x-1.5">
                           <span className="text-[10px] font-bold text-slate-400 uppercase">Line:</span>
-                          {canReorder && !isOnProcess && !isFinish ? (
+                          {!isOnProcess && !isFinish ? (
                             <select
                               value={item.testingLineId || ''}
                               onChange={(e) => handleAssignTestingLine(item.queueRecordId, e.target.value)}
                               className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-blue-500"
                             >
                               <option value="">Auto Line Allocation</option>
-                              {activeLinesForGroup.map((line) => (
+                              {filteredLines.map((line) => (
                                 <option key={line.id} value={line.id}>
                                   {line.name} ({line.process})
                                 </option>
@@ -692,6 +719,41 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                           ) : (
                             <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded text-[11px]">
                               {item.assignedLineName}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Assembly Mechanic Selector */}
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Mechanic:</span>
+                          {!isOnProcess && !isFinish ? (
+                            <select
+                              value={item.assemblyMechanic || ''}
+                              onChange={(e) => handleAssignMechanic(item.queueRecordId, e.target.value)}
+                              className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-blue-500 max-w-[150px] truncate"
+                            >
+                              <option value="">-- Choose Mechanic --</option>
+                              {assemblersList
+                                .filter((a) => (a.section || '').toUpperCase() === (item.compGroup || '').toUpperCase() || (item.compGroup === 'PT-PPM' && ((a.section || '').toUpperCase() === 'PT' || (a.section || '').toUpperCase() === 'PPM')))
+                                .map((a) => (
+                                  <option key={a.id} value={a.name}>
+                                    {a.name}
+                                  </option>
+                                ))
+                              }
+                              <option disabled>──────────</option>
+                              {assemblersList
+                                .filter((a) => !((a.section || '').toUpperCase() === (item.compGroup || '').toUpperCase() || (item.compGroup === 'PT-PPM' && ((a.section || '').toUpperCase() === 'PT' || (a.section || '').toUpperCase() === 'PPM'))))
+                                .map((a) => (
+                                  <option key={a.id} value={a.name}>
+                                    {a.name}
+                                  </option>
+                                ))
+                              }
+                            </select>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded text-[11px]">
+                              {item.assemblyMechanic || 'Unassigned'}
                             </span>
                           )}
                         </div>
@@ -1143,13 +1205,30 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
                     Assembly Mechanic
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Ardian Hidayat"
+                  <select
                     value={newMechanic}
                     onChange={(e) => setNewMechanic(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600"
-                  />
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:border-blue-600 font-semibold"
+                  >
+                    <option value="">-- Choose Mechanic --</option>
+                    {assemblersList
+                      .filter((a) => !selectedCompGroup || (a.section || '').toUpperCase() === selectedCompGroup.toUpperCase() || (selectedCompGroup === 'PT-PPM' && ((a.section || '').toUpperCase() === 'PT' || (a.section || '').toUpperCase() === 'PPM')))
+                      .map((a) => (
+                        <option key={a.id} value={a.name}>
+                          {a.name} ({a.section || 'Mechanic'})
+                        </option>
+                      ))
+                    }
+                    <option disabled>──────────</option>
+                    {assemblersList
+                      .filter((a) => !(!selectedCompGroup || (a.section || '').toUpperCase() === selectedCompGroup.toUpperCase() || (selectedCompGroup === 'PT-PPM' && ((a.section || '').toUpperCase() === 'PT' || (a.section || '').toUpperCase() === 'PPM'))))
+                      .map((a) => (
+                        <option key={a.id} value={a.name}>
+                          {a.name} ({a.section || 'Mechanic'})
+                        </option>
+                      ))
+                    }
+                  </select>
                 </div>
               </div>
 
