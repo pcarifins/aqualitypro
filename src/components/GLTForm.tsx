@@ -145,7 +145,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       return;
     }
 
-    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'GLT');
+    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'GLT', store.getTemplateRelationships());
 
     if (activeTemplates.length > 0) {
       const matchedTmpl = activeTemplates[0];

@@ -119,9 +119,9 @@ export async function fetchCollection<T>(collectionName: string): Promise<T[]> {
 }
 
 export async function saveDocument<
-  T extends { id?: string; queueRecordId?: string; reportId?: string; certificateId?: string }
+  T extends { id?: string; queueRecordId?: string; reportId?: string; certificateId?: string; profileId?: string; relationshipId?: string }
 >(collectionName: string, data: T): Promise<void> {
-  const docId = data.id || data.queueRecordId || data.reportId || data.certificateId;
+  const docId = data.id || data.queueRecordId || data.reportId || data.certificateId || data.profileId || data.relationshipId;
   if (!docId) {
     throw new Error(
       `Cannot save to ${collectionName}: Missing document id, queueRecordId, reportId, or certificateId`
@@ -349,6 +349,95 @@ export async function initializeAndMigrateFirestore(): Promise<{
       if (!existingHydIds.has(h.id)) {
         console.log(`Restoring missing hydraulic record: ${h.joNumber}`);
         await saveDocument('hydraulicRecords', h);
+        restoredCount++;
+      }
+    }
+
+    // 11. Standard Profiles
+    const existingProfiles = await fetchCollection<any>('standardProfiles');
+    const existingProfileIds = new Set(existingProfiles.map((p) => p.profileId));
+    const initialProfiles = [
+      {
+        profileId: 'prof-engine-std',
+        name: 'Std Engine Test Profile',
+        maxAllowableLoad: 450,
+        targetFlowRates: 'N/A',
+        torqueLimits: 'Min 1200 Nm, Max 2500 Nm',
+        vibrationThresholds: 'Max 4.5 mm/s',
+        notes: 'Standard profile for high-power diesel engine units.',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        profileId: 'prof-pump-std',
+        name: 'Std Hydraulic Pump Profile',
+        maxAllowableLoad: 350,
+        targetFlowRates: '350 L/min',
+        torqueLimits: 'Min 800 Nm, Max 1800 Nm',
+        vibrationThresholds: 'Max 2.5 mm/s',
+        notes: 'Standard profile for piston pump assemblies.',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        profileId: 'prof-cylinder-std',
+        name: 'Std Cylinder Profile',
+        maxAllowableLoad: 250,
+        targetFlowRates: '200 L/min',
+        torqueLimits: 'N/A',
+        vibrationThresholds: 'Max 1.5 mm/s',
+        notes: 'Standard profile for heavy double-acting cylinders.',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+    for (const p of initialProfiles) {
+      if (!existingProfileIds.has(p.profileId)) {
+        console.log(`Restoring missing standard profile: ${p.name}`);
+        await saveDocument('standardProfiles', p);
+        restoredCount++;
+      }
+    }
+
+    // 12. Template Relationships
+    const existingRelationships = await fetchCollection<any>('templateRelationships');
+    const existingRelationshipIds = new Set(existingRelationships.map((r) => r.relationshipId));
+    const initialRelationships = [
+      {
+        relationshipId: 'rel-engine-hd785',
+        productId: 'prod-01',
+        componentName: 'ENGINE ASSY',
+        unitModel: 'HD785-7',
+        productGroup: 'Engine',
+        finalProcess: 'DYNOTEST',
+        templateId: 'tmpl-dyno-hd785',
+        standardProfileId: 'prof-engine-std',
+        compatibleLineIds: ['dyno-1', 'dyno-2'],
+        status: 'ACTIVE',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        relationshipId: 'rel-pump-pc1250',
+        productId: 'prod-04',
+        componentName: 'MAIN PUMP NO 1',
+        unitModel: 'PC1250SP-8R',
+        productGroup: 'PT-PPM',
+        finalProcess: 'TESTBENCH',
+        templateId: 'tmpl-tb-pump-pc1250',
+        standardProfileId: 'prof-pump-std',
+        compatibleLineIds: ['tb-1', 'tb-2'],
+        status: 'ACTIVE',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+    for (const r of initialRelationships) {
+      if (!existingRelationshipIds.has(r.relationshipId)) {
+        console.log(`Restoring missing template relationship: ${r.relationshipId}`);
+        await saveDocument('templateRelationships', r);
         restoredCount++;
       }
     }

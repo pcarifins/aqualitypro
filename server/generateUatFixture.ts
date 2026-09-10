@@ -9,18 +9,17 @@ export function generateUatWorkbook(): Buffer {
   const priorityData = [
     [
       "JO / RO Number", "Component Group", "Sub Group", "Unit Model", "Component", 
-      "Test Type", "Planned Priority", "Customer", "Part Number", "Serial Number", 
-      "Assembly Mechanic", "Urgent", "Target Date", "Remark"
+      "Test Type", "Planned Priority", "Assembly Mechanic", "Urgent"
     ],
-    ["UAT26082801", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 1, "UAT INTERNAL - DO NOT SHIP", "6217-00-1001", "SN-UAT-ENG-01", "Ardian Hidayat", false, "2026-08-30", "UAT Test Engine 1"],
-    ["UAT26082802", "Engine", "PT", "PC2000-8R", "ENGINE ASSY", "RETEST", 2, "UAT INTERNAL - DO NOT SHIP", "6219-00-2002", "SN-UAT-ENG-02", "Ahmad Fauzi", false, "2026-08-30", "UAT Test Engine Retest"],
-    ["UAT26082803", "PT-PPM", "PT", "HD785-7", "TORQFLOW ASSY", "PROD", 3, "UAT INTERNAL - DO NOT SHIP", "1M-5500", "SN-UAT-PT-01", "Budi Santoso", false, "2026-08-31", "UAT Test PT"],
-    ["UAT26082804", "PT-PPM", "PPM", "PC1250SP-8R", "MAIN PUMP NO 1", "PROD", 999, "UAT INTERNAL - DO NOT SHIP", "708-2L-00400", "SN-UAT-PPM-01", "Kurniawan", true, "2026-08-29", "Urgent UAT Pump"],
-    ["UAT26082805", "PT-PPM", "PT", "D375A-6R", "FINAL DRIVE LEFT", "PROD", 4, "UAT INTERNAL - DO NOT SHIP", "195-27-12345", "SN-UAT-FD-01", "Suroso", false, "2026-09-01", "UAT Final Drive"],
-    ["UAT26082806", "PT-PPM", "PPM", "PC1250SP-8R", "SWING MOTOR", "PROD", 5, "UAT INTERNAL - DO NOT SHIP", "706-7K-98765", "SN-UAT-SM-01", "Joko Widodo", false, "2026-09-01", "UAT Swing Motor"],
-    ["UAT26082807", "Cylinder", "PT", "HD785-7", "HOIST CYLINDER", "PROD", 6, "UAT INTERNAL - DO NOT SHIP", "561-82-11111", "SN-UAT-HC-01", "Eko Prasetyo", false, "2026-09-02", "UAT Hoist Cylinder"],
-    ["UAT26082808", "Cylinder", "PT", "PC1250SP-8R", "ARM CYLINDER", "RETEST", 7, "UAT INTERNAL - DO NOT SHIP", "707-82-22222", "SN-UAT-AC-02", "Agus Setiawan", false, "2026-09-02", "UAT Arm Cylinder Retest"],
-    ["UAT26082809", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 8, "UAT INTERNAL - DO NOT SHIP", "6217-00-1002", "SN-UAT-ENG-03", "Rahmat Hidayat", false, "2026-09-03", "UAT Engine 3"]
+    ["UAT26082801", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 1, "Ardian Hidayat", false],
+    ["UAT26082802", "Engine", "PT", "PC2000-8R", "ENGINE ASSY", "RETEST", 2, "Ahmad Fauzi", false],
+    ["UAT26082803", "PT-PPM", "PT", "HD785-7", "TORQFLOW ASSY", "PROD", 3, "Budi Santoso", false],
+    ["UAT26082804", "PT-PPM", "PPM", "PC1250SP-8R", "MAIN PUMP NO 1", "PROD", 999, "Kurniawan", true],
+    ["UAT26082805", "PT-PPM", "PT", "D375A-6R", "FINAL DRIVE LEFT", "PROD", 4, "Suroso", false],
+    ["UAT26082806", "PT-PPM", "PPM", "PC1250SP-8R", "SWING MOTOR", "PROD", 5, "Joko Widodo", false],
+    ["UAT26082807", "Cylinder", "PT", "HD785-7", "HOIST CYLINDER", "PROD", 6, "Eko Prasetyo", false],
+    ["UAT26082808", "Cylinder", "PT", "PC1250SP-8R", "ARM CYLINDER", "RETEST", 7, "Agus Setiawan", false],
+    ["UAT26082809", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 8, "Rahmat Hidayat", false]
   ];
   const wsPriority = xlsx.utils.aoa_to_sheet(priorityData);
   xlsx.utils.book_append_sheet(wb, wsPriority, "Priority Testing");

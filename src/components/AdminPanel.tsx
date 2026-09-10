@@ -7,6 +7,7 @@ import {
   ChecksheetItem,
   TestingLine,
   TestOverride,
+  TemplateRelationship,
 } from '../types';
 import {
   Settings,
@@ -89,14 +90,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     | 'operatingHours'
     | 'testOverride'
     | 'auditLogs'
+    | 'templateRelationships'
   >('testingLines');
 
-  // Real-time local state for Test Overrides and Audit Logs
+  // Real-time local state for Test Overrides, Audit Logs, and Template Relationships
   const [testOverrides, setTestOverrides] = useState<TestOverride[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [templateRelationships, setTemplateRelationships] = useState<TemplateRelationship[]>([]);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Form State for Template Relationship
+  const [relProductId, setRelProductId] = useState('');
+  const [relTemplateId, setRelTemplateId] = useState('');
+  const [relProcess, setRelProcess] = useState<'Dynotest' | 'Testbench'>('Dynotest');
+  const [relStatus, setRelStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [relSearch, setRelSearch] = useState('');
 
   // Form State for Test Override
   const [ovrJoNumber, setOvrJoNumber] = useState('');
@@ -115,7 +125,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [overrideSearch, setOverrideSearch] = useState('');
   const [auditSearch, setAuditSearch] = useState('');
 
-  // Sync testOverrides and auditLogs from global reactive store
+  // Sync testOverrides, auditLogs, and templateRelationships from global reactive store
   const loadConfigData = async () => {
     const [ovrs, logs] = await Promise.all([
       apiClient.getTestOverrides(),
@@ -123,6 +133,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     ]);
     setTestOverrides(ovrs || []);
     setAuditLogs(logs || []);
+    setTemplateRelationships(store.getTemplateRelationships() || []);
   };
 
   useEffect(() => {
@@ -250,6 +261,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Template Relationship Handlers
+  const handleSaveRelationship = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!relProductId || !relTemplateId || !relProcess) {
+      setActionError('Please select both a Product Model and a Checksheet Template.');
+      return;
+    }
+    setIsActionLoading(true);
+    setActionError(null);
+    try {
+      const prod = productModels.find(m => m.id === relProductId);
+      const tmpl = templates.find(t => t.id === relTemplateId);
+      if (!prod || !tmpl) throw new Error('Product or Template not found');
+
+      const relationship: TemplateRelationship = {
+        id: `rel-${Date.now()}`,
+        relationshipId: `rel-${Date.now()}`,
+        productId: prod.id,
+        unitModel: prod.unitModel,
+        componentName: prod.component,
+        productGroup: prod.compGroup,
+        finalProcess: relProcess === 'Dynotest' ? 'DYNOTEST' : 'TESTBENCH',
+        templateId: tmpl.id,
+        templateName: tmpl.name,
+        standardProfileId: '',
+        compatibleLineIds: [],
+        status: relStatus,
+        version: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await store.saveTemplateRelationship(relationship);
+      showTemporarySuccess('Template relationship mapping saved successfully.');
+      setRelProductId('');
+      setRelTemplateId('');
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to save template relationship mapping');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleToggleRelationshipStatus = async (rel: TemplateRelationship) => {
+    try {
+      const updated: TemplateRelationship = {
+        ...rel,
+        status: rel.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
+      };
+      await store.saveTemplateRelationship(updated);
+      showTemporarySuccess(`Relationship status toggled to ${updated.status}.`);
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to update relationship status');
+    }
+  };
+
+  const handleDeleteRelationship = async (id: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this template relationship mapping?')) return;
+    try {
+      await store.deleteTemplateRelationship(id);
+      showTemporarySuccess('Relationship mapping deleted successfully.');
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to delete template relationship mapping');
+    }
+  };
+
+  const missingLinks = useMemo(() => {
+    const missing: { product: ProductModel; requiredProcess: 'Dynotest' | 'Testbench'; warningType: 'NO_MAPPING_NOR_TEMPLATE' | 'NO_MAPPING_HAS_EXACT' }[] = [];
+    
+    // Normalize simple helper
+    const norm = (s: string | undefined) => (s || '').toLowerCase().replace(/\s+/g, '');
+
+    productModels.filter(m => m.active).forEach(prod => {
+      const requiredProcess: 'Dynotest' | 'Testbench' = prod.compGroup === 'Engine' ? 'Dynotest' : 'Testbench';
+      
+      const hasRel = templateRelationships.some(
+        r => r.productId === prod.id && r.finalProcess.toUpperCase() === requiredProcess.toUpperCase() && r.status === 'ACTIVE'
+      );
+      
+      if (!hasRel) {
+        // Check if an exact checksheet template matches this product model
+        const exactTmpl = templates.some(t => 
+          t.status === 'ACTIVE' && 
+          t.testStage === requiredProcess && 
+          t.compGroup === prod.compGroup &&
+          ((t.compatibleProductIds && t.compatibleProductIds.includes(prod.id)) ||
+           (t.productMasterId && t.productMasterId === prod.id) ||
+           (norm(t.component) === norm(prod.component) && norm(t.unitModel) === norm(prod.unitModel)))
+        );
+
+        missing.push({
+          product: prod,
+          requiredProcess,
+          warningType: exactTmpl ? 'NO_MAPPING_HAS_EXACT' : 'NO_MAPPING_NOR_TEMPLATE'
+        });
+      }
+    });
+    return missing;
+  }, [productModels, templateRelationships, templates]);
+
   const showTemporarySuccess = (msg: string) => {
     setActionSuccess(msg);
     setTimeout(() => setActionSuccess(null), 3000);
@@ -267,6 +378,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
     });
   }, [testOverrides, overrideSearch]);
+
+  const filteredRelationships = useMemo(() => {
+    return templateRelationships.filter(r => {
+      if (!relSearch) return true;
+      const s = relSearch.toLowerCase();
+      return (
+        (r.componentName || '').toLowerCase().includes(s) ||
+        (r.unitModel || '').toLowerCase().includes(s) ||
+        (r.templateName || '').toLowerCase().includes(s) ||
+        (r.finalProcess || '').toLowerCase().includes(s)
+      );
+    });
+  }, [templateRelationships, relSearch]);
 
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((l) => {
@@ -514,6 +638,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               >
                 <Users className="w-3.5 h-3.5" />
                 <span>Users & RBAC</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('templateRelationships')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                  activeTab === 'templateRelationships'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5 text-blue-500" />
+                <span>Template Relationships</span>
               </button>
 
               <button
@@ -922,6 +1059,225 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 onDuplicateTemplate={onDuplicateTemplate}
                 onDeleteTemplate={onDeleteTemplate}
               />
+            )}
+
+            {activeTab === 'templateRelationships' && isAdmin && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">Checksheet Template Relationships</h3>
+                    <p className="text-xs text-slate-500">Explicitly link Product Masters to exact testing templates for Dynotest and Testbench, avoiding silent fallbacks.</p>
+                  </div>
+                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded-md">
+                    {templateRelationships.length} Mappings Active
+                  </span>
+                </div>
+
+                {/* Missing Links Scanner Section */}
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-black text-amber-900 uppercase tracking-wider">Missing Relationships Warning Report ({missingLinks.length})</span>
+                  </div>
+                  <p className="text-xs text-amber-800">
+                    The following active products do not have explicit template relationship mappings. Red warnings will block progression in testing, while orange warnings utilize exact-string fallback resolution.
+                  </p>
+                  {missingLinks.length === 0 ? (
+                    <div className="text-xs text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
+                      ✓ All active Product Masters are fully linked with explicit template relationships! No testing blocks possible.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[220px] overflow-y-auto pr-1">
+                      {missingLinks.map(({ product, requiredProcess, warningType }) => (
+                        <div key={`${product.id}-${requiredProcess}`} className={`p-3 rounded-xl border text-xs flex flex-col justify-between space-y-1.5 bg-white ${
+                          warningType === 'NO_MAPPING_NOR_TEMPLATE' ? 'border-rose-200 bg-rose-50/20 shadow-2xs' : 'border-amber-200 shadow-2xs'
+                        }`}>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <strong className="text-slate-900 truncate max-w-[120px]">{product.component}</strong>
+                              <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-sm ${
+                                warningType === 'NO_MAPPING_NOR_TEMPLATE' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {warningType === 'NO_MAPPING_NOR_TEMPLATE' ? 'FATAL BLOCK' : 'EXACT FALLBACK'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono mt-0.5">{product.unitModel}</div>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-slate-100">
+                            <span className="text-slate-600">Requires: <strong>{requiredProcess}</strong></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRelProductId(product.id);
+                                setRelProcess(requiredProcess);
+                                // Pre-select a likely template
+                                const candidateTmpl = templates.find(t => t.testStage === requiredProcess && t.compGroup === product.compGroup);
+                                if (candidateTmpl) {
+                                  setRelTemplateId(candidateTmpl.id);
+                                }
+                              }}
+                              className="text-blue-600 hover:text-blue-800 font-black"
+                            >
+                              + Create Link
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Create Link Form */}
+                  <div className="lg:col-span-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4 h-fit">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Configure New Relationship</h4>
+                    <form onSubmit={handleSaveRelationship} className="space-y-3.5">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Product Master</label>
+                        <select
+                          value={relProductId}
+                          onChange={(e) => setRelProductId(e.target.value)}
+                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="">-- Select Product Model --</option>
+                          {productModels.map((prod) => (
+                            <option key={prod.id} value={prod.id}>
+                              [{prod.compGroup}] {prod.component} - {prod.unitModel}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Testing Stage Process</label>
+                        <select
+                          value={relProcess}
+                          onChange={(e) => setRelProcess(e.target.value as any)}
+                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="Dynotest">Dynotest Engine Performance</option>
+                          <option value="Testbench">Testbench Hydraulic Performance</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Target Checksheet Template</label>
+                        <select
+                          value={relTemplateId}
+                          onChange={(e) => setRelTemplateId(e.target.value)}
+                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="">-- Select Template --</option>
+                          {templates
+                            .filter(t => t.status === 'ACTIVE' && (t.testStage === relProcess || (relProcess === 'Testbench' && t.testStage === 'Hydraulic Test')))
+                            .map((tmpl) => (
+                              <option key={tmpl.id} value={tmpl.id}>
+                                {tmpl.name} (v{tmpl.revision || 1})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Initial Mapping Status</label>
+                        <select
+                          value={relStatus}
+                          onChange={(e) => setRelStatus(e.target.value as any)}
+                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="ACTIVE">ACTIVE (Active Routing)</option>
+                          <option value="INACTIVE">INACTIVE (Do Not Route)</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isActionLoading}
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all pt-2.5"
+                      >
+                        {isActionLoading ? 'Saving...' : 'Save Mapping Relationship'}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Relationships List Table */}
+                  <div className="lg:col-span-2 space-y-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                        Active Relationship Links ({filteredRelationships.length})
+                      </h4>
+                      <input
+                        type="text"
+                        placeholder="Search mappings..."
+                        value={relSearch}
+                        onChange={(e) => setRelSearch(e.target.value)}
+                        className="w-full sm:max-w-[220px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white text-xs shadow-3xs">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[10px] font-bold uppercase">
+                            <th className="px-4 py-2.5">Component Master</th>
+                            <th className="px-4 py-2.5">Process</th>
+                            <th className="px-4 py-2.5">Mapped Checksheet Template</th>
+                            <th className="px-4 py-2.5 text-center">Status</th>
+                            <th className="px-4 py-2.5 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredRelationships.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-8 text-center text-slate-400 font-medium">
+                                No template relationship mappings match your filters.
+                              </td>
+                            </tr>
+                          ) : (
+                             filteredRelationships.map((rel) => (
+                              <tr key={rel.relationshipId} className="hover:bg-slate-50/50">
+                                <td className="px-4 py-3">
+                                  <div className="font-bold text-slate-900">{rel.componentName}</div>
+                                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">{rel.unitModel}</div>
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-700">
+                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
+                                    rel.finalProcess.toUpperCase() === 'DYNOTEST' ? 'bg-orange-50 text-orange-700' : 'bg-cyan-50 text-cyan-700'
+                                  }`}>
+                                    {rel.finalProcess}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 font-medium text-slate-800">
+                                  {rel.templateName}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleRelationshipStatus(rel)}
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                      rel.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}
+                                  >
+                                    {rel.status}
+                                  </button>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteRelationship(rel.relationshipId)}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {activeTab === 'product' && isAdmin && (

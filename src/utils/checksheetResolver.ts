@@ -1,4 +1,4 @@
-import { ProductModel, ChecksheetTemplate, TestProcess } from '../types';
+import { ProductModel, ChecksheetTemplate, TestProcess, TemplateRelationship } from '../types';
 import { normalizeString } from './normalization';
 
 export function findMatchingProduct(
@@ -32,11 +32,42 @@ export function findMatchingProduct(
 export function getCompatibleTemplates(
   templates: ChecksheetTemplate[],
   product: ProductModel,
-  testStage: TestProcess
+  testStage: TestProcess,
+  templateRelationships: TemplateRelationship[] = []
 ): ChecksheetTemplate[] {
   const normProductComp = normalizeString(product.component);
   const normProductUnit = normalizeString(product.unitModel);
 
+  // 1. Try Explicit Relationship model first
+  if (templateRelationships && templateRelationships.length > 0) {
+    const matchedRel = templateRelationships.find((r) => {
+      if (r.status !== 'ACTIVE') return false;
+      const fp = r.finalProcess.toUpperCase();
+      const ts = testStage.toUpperCase();
+      const isStageMatch =
+        fp === ts ||
+        (ts === 'HYDRAULIC TEST' && fp === 'TESTBENCH') ||
+        (ts === 'TESTBENCH' && fp === 'HYDRAULIC TEST');
+      if (!isStageMatch) return false;
+
+      // Exact product ID match
+      if (r.productId === product.id) return true;
+
+      // Component & Unit match
+      const normRelComp = normalizeString(r.componentName);
+      const normRelUnit = normalizeString(r.unitModel);
+      return normRelComp === normProductComp && normRelUnit === normProductUnit;
+    });
+
+    if (matchedRel) {
+      const template = templates.find((t) => t.id === matchedRel.templateId && t.status === 'ACTIVE');
+      if (template) {
+        return [template];
+      }
+    }
+  }
+
+  // 2. Direct exact or compatibility checks in existing templates
   const matched = templates.filter((t) => {
     // 4. The checksheet is active.
     if (t.status !== 'ACTIVE') return false;
@@ -80,40 +111,28 @@ export function getCompatibleTemplates(
 
   if (matched.length > 0) return matched;
 
-  // FALLBACK DYNAMIC GENERATION FOR 100% COVERAGE
-  // Find any active template for the same stage & compGroup as a base reference
-  const baseTmpl = templates.find((t) => {
+  // 3. Contingency Matching
+  // Look for any active contingency checksheet template matching this stage and component group
+  const contingencyTemplates = templates.filter((t) => {
     if (t.status !== 'ACTIVE') return false;
     const isStageMatch =
       t.testStage === testStage ||
       (testStage === 'Hydraulic Test' && t.testStage === 'Testbench') ||
       (testStage === 'Testbench' && t.testStage === 'Hydraulic Test');
-    return isStageMatch && t.compGroup === product.compGroup;
-  }) || templates.find((t) => {
-    // Ultimate fallback if no matching compGroup template exists for this stage
-    if (t.status !== 'ACTIVE') return false;
-    const isStageMatch =
-      t.testStage === testStage ||
-      (testStage === 'Hydraulic Test' && t.testStage === 'Testbench') ||
-      (testStage === 'Testbench' && t.testStage === 'Hydraulic Test');
-    return isStageMatch;
+    if (!isStageMatch) return false;
+
+    const isContingencyFlag = t.isContingency === true ||
+      t.name.toLowerCase().includes('contingency') ||
+      t.name.toLowerCase().includes('performance-only') ||
+      t.name.toLowerCase().includes('performance only');
+
+    return isContingencyFlag && t.compGroup === product.compGroup;
   });
 
-  if (baseTmpl) {
-    const fallbackTemplate: ChecksheetTemplate = {
-      ...baseTmpl,
-      id: `tmpl-fallback-${product.id}-${testStage.toLowerCase().replace(/\s+/g, '-')}`,
-      name: `${product.component} ${testStage} (Auto)`,
-      compGroup: product.compGroup,
-      unitModel: product.unitModel,
-      component: product.component,
-      productMasterId: product.id,
-      compatibleProductIds: [product.id],
-      status: 'ACTIVE',
-      sections: JSON.parse(JSON.stringify(baseTmpl.sections)),
-    };
-    return [fallbackTemplate];
+  if (contingencyTemplates.length > 0) {
+    return [contingencyTemplates[0]];
   }
 
+  // Refuse to load any checksheet, fail loudly, block progression by returning empty
   return [];
 }

@@ -22,6 +22,8 @@ import {
   QualityCertificateRecord,
   ProductMasterValidationReport,
   TestOverride,
+  TemplateRelationship,
+  StandardProfile,
 } from '../types';
 
 import {
@@ -66,6 +68,8 @@ const STORAGE_KEYS = {
   PDF_REPORTS: 'aquality_pdf_reports_v2',
   CERTIFICATES: 'aquality_certificates_v2',
   TEST_OVERRIDES: 'aquality_test_overrides_v2',
+  RELATIONSHIPS: 'aquality_relationships_v2',
+  STANDARD_PROFILES: 'aquality_standard_profiles_v2',
 };
 
 const getStorage = (key: string): string | null => {
@@ -96,6 +100,8 @@ class DataStore {
   private certificates: QualityCertificateRecord[] = [];
   private auditLogs: any[] = [];
   private testOverrides: TestOverride[] = [];
+  private templateRelationships: TemplateRelationship[] = [];
+  private standardProfiles: StandardProfile[] = [];
 
   private listeners: (() => void)[] = [];
   private isInitialized = false;
@@ -275,6 +281,20 @@ class DataStore {
             this.saveToStorageCache();
             this.notifyListeners();
           }
+        }),
+        subscribeAndResolve<TemplateRelationship>('templateRelationships', (data) => {
+          if (data) {
+            this.templateRelationships = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
+        }),
+        subscribeAndResolve<StandardProfile>('standardProfiles', (data) => {
+          if (data) {
+            this.standardProfiles = data;
+            this.saveToStorageCache();
+            this.notifyListeners();
+          }
         })
       ]);
 
@@ -352,6 +372,12 @@ class DataStore {
       const ovr = getStorage(STORAGE_KEYS.TEST_OVERRIDES);
       this.testOverrides = ovr ? JSON.parse(ovr) : [];
 
+      const rel = getStorage(STORAGE_KEYS.RELATIONSHIPS);
+      this.templateRelationships = rel ? JSON.parse(rel) : [];
+
+      const prof = getStorage(STORAGE_KEYS.STANDARD_PROFILES);
+      this.standardProfiles = prof ? JSON.parse(prof) : [];
+
       // Idempotently guarantee 100% active templates are pre-populated and cached
       this.ensureStarterChecksheetsForAllActiveProducts();
     } catch {
@@ -374,6 +400,8 @@ class DataStore {
       setStorage(STORAGE_KEYS.PDF_REPORTS, JSON.stringify(this.pdfReports));
       setStorage(STORAGE_KEYS.CERTIFICATES, JSON.stringify(this.certificates));
       setStorage(STORAGE_KEYS.TEST_OVERRIDES, JSON.stringify(this.testOverrides));
+      setStorage(STORAGE_KEYS.RELATIONSHIPS, JSON.stringify(this.templateRelationships));
+      setStorage(STORAGE_KEYS.STANDARD_PROFILES, JSON.stringify(this.standardProfiles));
     } catch {}
   }
 
@@ -390,6 +418,8 @@ class DataStore {
     this.testingLines = [...initialTestingLines];
     this.pdfReports = [];
     this.certificates = [];
+    this.templateRelationships = [];
+    this.standardProfiles = [];
     this.saveToStorageCache();
     this.notifyListeners();
   }
@@ -991,7 +1021,7 @@ class DataStore {
     const product = findMatchingProduct(this.models, component, unitModel);
     if (!product) return null;
 
-    const compatibles = getCompatibleTemplates(this.templates, product, testStage);
+    const compatibles = getCompatibleTemplates(this.templates, product, testStage, this.getTemplateRelationships());
     return compatibles.length > 0 ? compatibles[0] : null;
   }
 
@@ -1661,31 +1691,132 @@ class DataStore {
     const batch = writeBatch(db);
     
     for (const q of records) {
-      // Determine canonical line based on gltStatus and compGroup
       let canonicalLineId = q.currentTestingLineId || q.testingLineId;
+      let schedulingWarning: string | undefined = undefined;
       
+      // 1. If GLT is not GOOD and not RETEST, it must be on GLT line first
       if (q.gltStatus !== 'GOOD' && q.testType !== 'RETEST') {
         const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
         if (canonicalLineId !== gltLine) {
           canonicalLineId = gltLine;
         }
       } else {
-        // If gltStatus is 'GOOD', but currently assigned line is a GLT line or missing
-        if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
-          if (q.compGroup === 'Engine') {
-            canonicalLineId = 'dyno-1';
-          } else if (q.compGroup === 'Cylinder') {
-            canonicalLineId = 'tb-4-cyl';
+        // 2. GLT is GOOD or Retest. Auto-schedule based on compatibility!
+        const product = this.models.find(m => m.id === q.productModelId || 
+          (normalizeString(m.unitModel) === normalizeString(q.unitModel) && 
+           normalizeString(m.component) === normalizeString(q.component))
+        );
+
+        const testStage = q.compGroup === 'Engine' ? 'Dynotest' : 'Testbench';
+        const template = this.getActiveTemplate(q.compGroup, q.unitModel, q.component, testStage);
+        const durationMinutes = (product?.standardTestDurationMinutes || 120) + 
+                                (product?.setupTimeMinutes || 30);
+
+        // Find active compatible lines for this process stage
+        const activeLines = this.testingLines.filter(line => 
+          line.active && 
+          line.process.toUpperCase() === testStage.toUpperCase()
+        );
+
+        if (activeLines.length > 0) {
+          // Technical matching logic
+          const compatibleCandidates = activeLines.filter(line => {
+            // Power limit check
+            if (line.maximumPower && product?.nominalPower && product.nominalPower > line.maximumPower) {
+              return false;
+            }
+            // Torque limit check
+            if (line.maximumTorque && product?.nominalTorque && product.nominalTorque > line.maximumTorque) {
+              return false;
+            }
+            // RPM limit check
+            if (line.maximumRPM && product?.nominalRPM && product.nominalRPM > line.maximumRPM) {
+              return false;
+            }
+            return true;
+          });
+
+          if (compatibleCandidates.length > 0) {
+            // Find candidate with capacity
+            const candidatesWithCapacity = compatibleCandidates.filter(line => {
+              const parseTimeToMinutes = (tStr: string | undefined): number => {
+                if (!tStr) return 0;
+                const parts = tStr.split(':');
+                return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+              };
+              const startMins = parseTimeToMinutes(line.shiftStart || '08:00');
+              const endMins = parseTimeToMinutes(line.shiftEnd || '17:00');
+              const totalShiftMins = endMins - startMins - (line.breakMinutes || 0);
+
+              // Calculate current assigned load on this line (excluding current item)
+              const assignedLoad = records
+                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                .reduce((sum, item) => {
+                  const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
+                  const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
+                  return sum + itemDur;
+                }, 0);
+
+              const remainingCapacity = totalShiftMins - assignedLoad;
+              return durationMinutes <= remainingCapacity;
+            });
+
+          if (candidatesWithCapacity.length > 0) {
+            // Select the candidate with the lowest queue loading (least busy)
+            let leastBusyLine = candidatesWithCapacity[0];
+            let minAssigned = Infinity;
+
+            for (const line of candidatesWithCapacity) {
+              const assignedLoad = records
+                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                .reduce((sum, item) => {
+                  const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
+                  const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
+                  return sum + itemDur;
+                }, 0);
+
+              if (assignedLoad < minAssigned) {
+                minAssigned = assignedLoad;
+                leastBusyLine = line;
+              }
+            }
+            canonicalLineId = leastBusyLine.id;
+            schedulingWarning = undefined;
           } else {
-            canonicalLineId = 'tb-1'; // PT-PPM
+            // No capacity today! Pick the compatible line with the shortest queue
+            let leastBusyLine = compatibleCandidates[0];
+            let minAssigned = Infinity;
+
+            for (const line of compatibleCandidates) {
+              const assignedLoad = records
+                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                .reduce((sum, item) => {
+                  const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
+                  const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
+                  return sum + itemDur;
+                }, 0);
+
+              if (assignedLoad < minAssigned) {
+                minAssigned = assignedLoad;
+                leastBusyLine = line;
+              }
+            }
+            canonicalLineId = leastBusyLine.id;
+            schedulingWarning = `No compatible line has remaining shift capacity for today (${durationMinutes} mins required). Queued on ${leastBusyLine.name} for the next shift.`;
           }
+        } else {
+          // Technically incompatible with all lines! Force to first but flag warning
+          canonicalLineId = activeLines[0].id;
+          schedulingWarning = `WARNING: Technical parameters exceed active limits. Forced onto ${activeLines[0].name}.`;
         }
       }
+      }
       
-      // If there's a missing or mismatched canonical line ID
-      if (q.currentTestingLineId !== canonicalLineId || q.testingLineId !== canonicalLineId) {
+      // If there's a change
+      if (q.currentTestingLineId !== canonicalLineId || q.testingLineId !== canonicalLineId || q.schedulingWarning !== schedulingWarning) {
         q.currentTestingLineId = canonicalLineId;
         q.testingLineId = canonicalLineId;
+        q.schedulingWarning = schedulingWarning;
         q.updatedAt = new Date().toISOString();
         
         try {
@@ -1740,6 +1871,7 @@ class DataStore {
     }
 
     await this.normalizeQueuePriorities(record.compGroup);
+    await this.ensureTestingLineAssignments(this.queueRecords);
 
     await logAuditEvent({
       action: 'ADD_QUEUE_RECORD',
@@ -2070,6 +2202,88 @@ class DataStore {
       });
       this.notifyListeners();
     }
+  }
+
+  // --- TEMPLATE RELATIONSHIPS ---
+  public getTemplateRelationships(): TemplateRelationship[] {
+    return this.templateRelationships || [];
+  }
+
+  public async saveTemplateRelationship(rel: TemplateRelationship, actorName = 'Admin'): Promise<void> {
+    const isNew = !this.templateRelationships.some((r) => r.relationshipId === rel.relationshipId);
+    await saveDocument('templateRelationships', rel);
+    const idx = this.templateRelationships.findIndex((r) => r.relationshipId === rel.relationshipId);
+    if (idx >= 0) {
+      this.templateRelationships[idx] = rel;
+    } else {
+      this.templateRelationships.push(rel);
+    }
+    this.saveToStorageCache();
+
+    await logAuditEvent({
+      action: isNew ? 'RELATIONSHIP_CREATED' : 'RELATIONSHIP_UPDATED',
+      collectionName: 'templateRelationships',
+      documentId: rel.relationshipId,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} relationship matching template ${rel.templateId} to component ${rel.componentName} on ${rel.unitModel}`,
+    });
+    this.notifyListeners();
+  }
+
+  public async deleteTemplateRelationship(id: string, actorName = 'Admin'): Promise<void> {
+    await removeDocument('templateRelationships', id);
+    this.templateRelationships = this.templateRelationships.filter((r) => r.relationshipId !== id);
+    this.saveToStorageCache();
+
+    await logAuditEvent({
+      action: 'RELATIONSHIP_DELETED',
+      collectionName: 'templateRelationships',
+      documentId: id,
+      userName: actorName,
+      details: `Deleted template relationship ID: ${id}`,
+    });
+    this.notifyListeners();
+  }
+
+  // --- STANDARD PROFILES ---
+  public getStandardProfiles(): StandardProfile[] {
+    return this.standardProfiles || [];
+  }
+
+  public async saveStandardProfile(prof: StandardProfile, actorName = 'Admin'): Promise<void> {
+    const isNew = !this.standardProfiles.some((p) => p.profileId === prof.profileId);
+    await saveDocument('standardProfiles', prof);
+    const idx = this.standardProfiles.findIndex((p) => p.profileId === prof.profileId);
+    if (idx >= 0) {
+      this.standardProfiles[idx] = prof;
+    } else {
+      this.standardProfiles.push(prof);
+    }
+    this.saveToStorageCache();
+
+    await logAuditEvent({
+      action: isNew ? 'PROFILE_CREATED' : 'PROFILE_UPDATED',
+      collectionName: 'standardProfiles',
+      documentId: prof.profileId,
+      userName: actorName,
+      details: `${isNew ? 'Created' : 'Updated'} standard test profile ${prof.name}`,
+    });
+    this.notifyListeners();
+  }
+
+  public async deleteStandardProfile(id: string, actorName = 'Admin'): Promise<void> {
+    await removeDocument('standardProfiles', id);
+    this.standardProfiles = this.standardProfiles.filter((p) => p.profileId !== id);
+    this.saveToStorageCache();
+
+    await logAuditEvent({
+      action: 'PROFILE_DELETED',
+      collectionName: 'standardProfiles',
+      documentId: id,
+      userName: actorName,
+      details: `Deleted standard profile ID: ${id}`,
+    });
+    this.notifyListeners();
   }
 }
 

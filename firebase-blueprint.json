@@ -179,6 +179,36 @@
         "standardDurationMinutes": { "type": "number" }
       },
       "required": ["id", "name", "process", "componentGroup"]
+    },
+    "TemplateRelationship": {
+      "title": "TemplateRelationship",
+      "description": "Mapping from product model to checksheet templates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "unitModel": { "type": "string" },
+        "componentName": { "type": "string" },
+        "finalProcess": { "type": "string" },
+        "templateId": { "type": "string" },
+        "templateName": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "productId", "templateId", "finalProcess"]
+    },
+    "StandardProfile": {
+      "title": "StandardProfile",
+      "description": "Engine and component testing profile templates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "requiredProcess": { "type": "string" },
+        "parameterCount": { "type": "number" },
+        "description": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "requiredProcess"]
     }
   },
   "firestore": {
@@ -195,6 +225,8 @@
     "pdfReports": { "schema": "PDFReport", "description": "PDF test reports collection" },
     "auditLogs": { "schema": "AuditLog", "description": "Audit log records collection" },
     "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" },
-    "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" }
+    "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" },
+    "templateRelationships": { "schema": "TemplateRelationship", "description": "Product and template relationship mappings" },
+    "standardProfiles": { "schema": "StandardProfile", "description": "Standard standard profiles master" }
   }
 }

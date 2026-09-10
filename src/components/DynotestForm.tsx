@@ -124,7 +124,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       return;
     }
 
-    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Dynotest');
+    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Dynotest', store.getTemplateRelationships());
 
     if (activeTemplates.length > 0) {
       const matchedTmpl = activeTemplates[0];
@@ -695,14 +695,22 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
           </p>
         </div>
       ) : checksheetItems.filter((i) => i.active !== false).length === 0 ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-2">
-          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto font-bold text-lg">
-            !
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-6 h-6" />
           </div>
-          <h4 className="text-sm font-bold text-amber-900">Checksheet Not Configured</h4>
-          <p className="text-xs text-amber-800 max-w-md mx-auto">
-            No active checksheet is configured for: <strong>{component} – {unitModel} in Dynotest</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
+          <h4 className="text-sm font-bold text-rose-900">FATAL: Testing Blocked - No Valid Template Relationship Resolved</h4>
+          <p className="text-xs text-rose-800 max-w-lg mx-auto leading-relaxed">
+            AQualityPRO has refused to load a generic checksheet for <strong>{component} – {unitModel}</strong> to prevent incorrect template usage. No direct checksheet or explicit relationship has been linked to this Product Master, and no Performance-only contingency checksheet was found for this group in <strong>Dynotest</strong>.
           </p>
+          <div className="bg-white border border-rose-150 p-3 rounded-xl max-w-md mx-auto text-left text-xs space-y-1 text-slate-700">
+            <div>• Component: <strong className="font-mono text-slate-900">{component}</strong></div>
+            <div>• Model: <strong className="font-mono text-slate-900">{unitModel}</strong></div>
+            <div>• Required Process: <strong className="text-slate-900">Dynotest Engine Performance</strong></div>
+          </div>
+          <div className="pt-2">
+            <span className="text-xs font-bold text-slate-500">Please contact a Quality Administrator to resolve this template link or configure a contingency sheet in Admin Dashboard.</span>
+          </div>
         </div>
       ) : !receivingTime ? (
         <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-7 text-center space-y-3">

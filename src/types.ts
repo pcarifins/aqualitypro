@@ -81,6 +81,17 @@ export interface ProductModel {
   modelName: string;
   code?: string;
   active: boolean;
+
+  // Extended properties for AQualityPRO
+  productId?: string;
+  productGroup?: string;
+  nominalPower?: number; // kW
+  nominalTorque?: number; // Nm
+  nominalRPM?: number;
+  requiredFixture?: string;
+  requiredAdapter?: string;
+  standardTestDurationMinutes?: number;
+  setupTimeMinutes?: number;
 }
 
 export interface ProductMasterValidationReport {
@@ -152,6 +163,7 @@ export interface ChecksheetTemplate {
   createdAt: string;
   updatedAt: string;
   activatedAt?: string;
+  isContingency?: boolean; // Flag to indicate performance-only contingency Checks
 }
 
 export interface TestingLine {
@@ -172,6 +184,62 @@ export interface TestingLine {
   breakMinutes?: number;
   netOperatingMinutes?: number;
   updatedBy?: string;
+
+  // Extended fields for scheduling constraints
+  lineId?: string;
+  lineName?: string;
+  compatibleProductIds?: string[];
+  compatibleComponentNames?: string[];
+  compatibleUnitModels?: string[];
+  minimumPower?: number;
+  maximumPower?: number;
+  minimumTorque?: number;
+  maximumTorque?: number;
+  minimumRPM?: number;
+  maximumRPM?: number;
+  requiredFixture?: string;
+  requiredAdapter?: string;
+  setupTimeMinutes?: number;
+  shiftStart?: string;
+  shiftEnd?: string;
+  breakDuration?: number;
+  maintenanceSchedule?: string;
+  schedulingPriority?: number;
+  temporaryUnavailable?: boolean;
+  unavailableReason?: string;
+}
+
+export interface StandardProfile {
+  profileId: string;
+  name: string;
+  maxAllowableLoad?: number;
+  targetFlowRates?: string;
+  torqueLimits?: string;
+  vibrationThresholds?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TemplateRelationship {
+  id?: string;
+  relationshipId: string;
+  productId: string;
+  componentName: string;
+  unitModel: string;
+  productGroup: string;
+  finalProcess: 'DYNOTEST' | 'TESTBENCH' | 'Dynotest' | 'Testbench';
+  templateId: string;
+  templateName?: string;
+  standardProfileId: string;
+  compatibleLineIds: string[];
+  status: 'ACTIVE' | 'INACTIVE' | 'REVIEW_REQUIRED';
+  version: number;
+  effectiveDate?: string;
+  approvedBy?: string;
+  approvedDate?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TestOverride {
@@ -230,6 +298,7 @@ export interface QueueRecord {
   updatedAt: string;
   history: PriorityChangeHistory[];
   aiRecommendation?: AIRecommendation;
+  schedulingWarning?: string;
 }
 
 // PDF Test Report Record Versioning
