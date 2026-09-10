@@ -51,7 +51,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const pendingTestbench = historyRecords.filter(
     (r) =>
-      r.productCategory === 'Power Train Component' &&
+      (r.productCategory === 'Power Train Component' || r.productCategory === 'Cylinder') &&
       r.gltRecords.length > 0 &&
       r.gltRecords[r.gltRecords.length - 1].result === 'GOOD' &&
       r.hydraulicRecords.length === 0

@@ -97,6 +97,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   // Form Flow Controls
   const [attemptNumber, setAttemptNumber] = useState<number>(1);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -485,6 +486,8 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   };
 
   const handleFinalSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const answerSnapshots = buildAnswerSnapshots();
       const submissionTime = new Date().toISOString();
@@ -540,6 +543,8 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       console.error('Failed to submit GLT record:', error);
       setValidationError(`Submission Failed: ${error?.message || 'Firestore write error'}`);
       setShowConfirmModal(false);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1062,9 +1067,12 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               </button>
               <button
                 onClick={handleFinalSubmit}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md"
+                disabled={isSubmitting}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold shadow-md text-white transition-colors ${
+                  isSubmitting ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                Confirm & Submit
+                {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
               </button>
             </div>
           </div>

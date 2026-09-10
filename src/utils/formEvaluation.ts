@@ -64,6 +64,17 @@ export function evaluateFormResult(
           item,
           reason: `Measured ${val}${item.unit ? ' ' + item.unit : ''} outside standard (${numEval.standardText})`,
         });
+      } else if (!item.validation || item.validation === 'NONE') {
+        // Numeric item with NO range standard needs manual GOOD/NOT GOOD selection
+        const judgment = answers[item.id + '_judgment'] ? answers[item.id + '_judgment'].trim() : '';
+        if (item.mandatory !== false && !judgment) {
+          missingItems.push(item);
+        } else if (judgment === 'NOT GOOD') {
+          failedItems.push({
+            item,
+            reason: itemRemarks[item.id] || `Measured ${val}${item.unit ? ' ' + item.unit : ''} and manually judged NOT GOOD`,
+          });
+        }
       }
     }
   }

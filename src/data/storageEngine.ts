@@ -4,6 +4,7 @@ import {
   ProductModel,
   ChecksheetItem,
   ChecksheetTemplate,
+  ChecksheetSection,
   ChecksheetSnapshot,
   GLTRecord,
   DynotestRecord,
@@ -350,6 +351,9 @@ class DataStore {
 
       const ovr = getStorage(STORAGE_KEYS.TEST_OVERRIDES);
       this.testOverrides = ovr ? JSON.parse(ovr) : [];
+
+      // Idempotently guarantee 100% active templates are pre-populated and cached
+      this.ensureStarterChecksheetsForAllActiveProducts();
     } catch {
       this.resetToDefault();
     }
@@ -640,19 +644,224 @@ class DataStore {
 
       if (!existing) {
         createdCount++;
-        const starterTemplate: ChecksheetTemplate = {
-          id: `tmpl-starter-${model.id}`,
-          name: `${model.unitModel} / ${model.component} Starter Checksheet`,
-          compGroup: model.compGroup,
-          productMasterId: model.id,
-          unitModel: model.unitModel,
-          component: model.component,
-          testStage,
-          revision: 1,
-          status: 'DRAFT',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          sections: [
+        
+        let sections: ChecksheetSection[] = [];
+        
+        if (model.compGroup === 'Cylinder') {
+          // Cylinder Template - 7 items
+          sections = [
+            {
+              id: `sec-vis-${model.id}`,
+              name: 'Visual & Pre-Test Inspection',
+              displayOrder: 1,
+              items: [
+                {
+                  id: `itm-cyl-vis-1-${model.id}`,
+                  itemName: 'Cylinder Tube & Rod Surface Finish',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-cyl-vis-2-${model.id}`,
+                  itemName: 'Seal and Wiper Ring Inspection',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: true,
+                }
+              ]
+            },
+            {
+              id: `sec-func-${model.id}`,
+              name: 'Functional Check',
+              displayOrder: 2,
+              items: [
+                {
+                  id: `itm-cyl-fn-1-${model.id}`,
+                  itemName: 'Full Stroke Travel & Smoothness',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-cyl-fn-2-${model.id}`,
+                  itemName: 'Cushioning Valve Operation',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: true,
+                }
+              ]
+            },
+            {
+              id: `sec-meas-${model.id}`,
+              name: 'Operating Parameters',
+              displayOrder: 3,
+              items: [
+                {
+                  id: `itm-cyl-ms-1-${model.id}`,
+                  itemName: 'Rod-End Oil Pressure',
+                  inputType: 'NUMERIC',
+                  unit: 'bar',
+                  validation: 'NONE',
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-cyl-ms-2-${model.id}`,
+                  itemName: 'Head-End Oil Pressure',
+                  inputType: 'NUMERIC',
+                  unit: 'bar',
+                  validation: 'NONE',
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-cyl-ms-3-${model.id}`,
+                  itemName: 'Internal Leakage Rate',
+                  inputType: 'NUMERIC',
+                  unit: 'cc/min',
+                  validation: 'NONE',
+                  displayOrder: 3,
+                  active: true,
+                  mandatory: false,
+                }
+              ]
+            }
+          ];
+        } else if (model.compGroup === 'PT-PPM') {
+          // PT or PPM Template - 10 items (8 to 15)
+          sections = [
+            {
+              id: `sec-vis-${model.id}`,
+              name: 'Visual & Pre-Test Inspection',
+              displayOrder: 1,
+              items: [
+                {
+                  id: `itm-vis-1-${model.id}`,
+                  itemName: 'Cleanliness & Foreign Object Inspection',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-vis-2-${model.id}`,
+                  itemName: 'Fasteners & Bolt Torque Verification',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-vis-3-${model.id}`,
+                  itemName: 'Part Number & Serial Number Verification',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 3,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-vis-4-${model.id}`,
+                  itemName: 'Seal, O-Ring & Gasket Placement Check',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 4,
+                  active: true,
+                  mandatory: true,
+                }
+              ]
+            },
+            {
+              id: `sec-fn-${model.id}`,
+              name: 'Functional Check',
+              displayOrder: 2,
+              items: [
+                {
+                  id: `itm-fn-1-${model.id}`,
+                  itemName: 'Shaft Rotation & Backlash Inspection',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-fn-2-${model.id}`,
+                  itemName: 'Solenoid & Sensor Functional Test',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-fn-3-${model.id}`,
+                  itemName: 'Internal Clutch / Gear Engagement Check',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 3,
+                  active: true,
+                  mandatory: true,
+                }
+              ]
+            },
+            {
+              id: `sec-perf-${model.id}`,
+              name: 'Operating & Performance Parameters',
+              displayOrder: 3,
+              items: [
+                {
+                  id: `itm-perf-1-${model.id}`,
+                  itemName: 'Main Pressure / Load Check',
+                  inputType: 'NUMERIC',
+                  unit: 'bar',
+                  validation: 'RANGE',
+                  minimumValue: 150,
+                  maximumValue: 350,
+                  displayOrder: 1,
+                  active: true,
+                  mandatory: true,
+                },
+                {
+                  id: `itm-perf-2-${model.id}`,
+                  itemName: 'Oil Temp Check',
+                  inputType: 'NUMERIC',
+                  unit: '°C',
+                  validation: 'RANGE',
+                  minimumValue: 40,
+                  maximumValue: 95,
+                  displayOrder: 2,
+                  active: true,
+                  mandatory: false,
+                },
+                {
+                  id: `itm-perf-3-${model.id}`,
+                  itemName: 'Oil Leakage Check under Load',
+                  inputType: 'GOOD / NOT GOOD',
+                  validation: 'NONE',
+                  displayOrder: 3,
+                  active: true,
+                  mandatory: true,
+                }
+              ]
+            }
+          ];
+        } else {
+          // Engine - default 3 items
+          sections = [
             {
               id: `sec-vis-${model.id}`,
               name: 'Visual & Pre-Test Inspection',
@@ -687,17 +896,32 @@ class DataStore {
                   id: `itm-perf-1-${model.id}`,
                   itemName: 'Operating Pressure / Load Check',
                   inputType: 'NUMERIC',
-                  unit: model.compGroup === 'Engine' ? 'kW' : 'bar',
+                  unit: 'kW',
                   validation: 'RANGE',
-                  minimumValue: model.compGroup === 'Engine' ? 100 : 150,
-                  maximumValue: model.compGroup === 'Engine' ? 500 : 350,
+                  minimumValue: 100,
+                  maximumValue: 500,
                   displayOrder: 1,
                   active: true,
                   mandatory: true,
                 },
               ],
             },
-          ],
+          ];
+        }
+
+        const starterTemplate: ChecksheetTemplate = {
+          id: `tmpl-starter-${model.id}`,
+          name: `${model.unitModel} / ${model.component} Starter Checksheet`,
+          compGroup: model.compGroup,
+          productMasterId: model.id,
+          unitModel: model.unitModel,
+          component: model.component,
+          testStage,
+          revision: 1,
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          sections,
         };
         this.templates.push(starterTemplate);
         saveDocument('checksheetTemplates', starterTemplate);
@@ -1132,14 +1356,62 @@ class DataStore {
       .filter((r) => matchJO(r.joNumber) && r.status === 'Submitted')
       .sort((a, b) => a.attemptNumber - b.attemptNumber);
 
-    if (glts.length === 0) return null;
+    const existingDyno = this.dynoRecords.filter((d) => matchJO(d.joNumber));
+    const existingHyd = this.hydraulicRecords.filter((h) => matchJO(h.joNumber));
 
-    const latestGLT = glts[glts.length - 1];
-    const isEngine =
-      latestGLT.compGroup === 'Engine' ||
-      latestGLT.productCategory === 'Engine' ||
-      latestGLT.productModel.toLowerCase().includes('engine') ||
-      latestGLT.productModel.toLowerCase().includes('saa');
+    const queueRec = this.queueRecords.find(
+      (q) => q.joRoNumber.toUpperCase() === rawClean
+    );
+
+    let latestGLT = glts.length > 0 ? glts[glts.length - 1] : null;
+    let isEngine = false;
+    let compGroup: CompGroup = 'PT-PPM';
+    let unitModel = '';
+    let component = '';
+    let productCategory: ProductCategory = 'Power Train Component';
+    let productModel = '';
+    let assemblyMechanic = '';
+    let latestGLTResult = '';
+    let gltIncomingTime = '';
+    let gltSubmissionTime = '';
+
+    if (latestGLT) {
+      isEngine =
+        latestGLT.compGroup === 'Engine' ||
+        latestGLT.productCategory === 'Engine' ||
+        latestGLT.productModel.toLowerCase().includes('engine') ||
+        latestGLT.productModel.toLowerCase().includes('saa');
+      compGroup = latestGLT.compGroup || (isEngine ? 'Engine' : 'PT-PPM');
+      unitModel = latestGLT.unitModel || '';
+      component = latestGLT.component || '';
+      productCategory = latestGLT.productCategory;
+      productModel = latestGLT.productModel;
+      assemblyMechanic = latestGLT.assemblyMechanic;
+      latestGLTResult = latestGLT.result;
+      gltIncomingTime = latestGLT.incomingTime;
+      gltSubmissionTime = latestGLT.submissionTime;
+    } else if (queueRec) {
+      compGroup = queueRec.compGroup;
+      isEngine = compGroup === 'Engine';
+      unitModel = queueRec.unitModel;
+      component = queueRec.component;
+      productCategory = compGroup === 'Engine' ? 'Engine' : compGroup === 'Cylinder' ? 'Cylinder' : 'Power Train Component';
+      productModel = `${unitModel}/${component}`;
+      assemblyMechanic = queueRec.assemblyMechanic || '';
+    } else {
+      const prev = existingDyno[0] || existingHyd[0];
+      if (prev) {
+        compGroup = prev.compGroup || 'PT-PPM';
+        isEngine = compGroup === 'Engine';
+        unitModel = prev.unitModel || '';
+        component = prev.component || '';
+        productCategory = prev.productCategory || 'Power Train Component';
+        productModel = prev.productModel || `${unitModel}/${component}`;
+        assemblyMechanic = prev.assemblyMechanic || '';
+      } else {
+        return null;
+      }
+    }
 
     if (targetStage === 'Dynotest' && !isEngine) {
       return { error: 'JO is a Power Train or Cylinder Component. Dynotest is only for Engines.' };
@@ -1148,20 +1420,34 @@ class DataStore {
       return { error: 'JO is an Engine. Hydraulic Test is only for Power Train & Cylinder Components.' };
     }
 
-    const existingDyno = this.dynoRecords.filter((d) => matchJO(d.joNumber));
-    const existingHyd = this.hydraulicRecords.filter((h) => matchJO(h.joNumber));
+    // Lead Time: Fix Actual Lead Time calculation (First Start -> Final PASS)
+    const sortedGlts = [...glts].sort((a, b) => a.attemptNumber - b.attemptNumber);
+    const oldestGlt = sortedGlts[0];
+    let firstStartIso = oldestGlt ? (oldestGlt.incomingTime || oldestGlt.submissionTime) : '';
+
+    if (!firstStartIso) {
+      const bRecords = [...existingDyno, ...existingHyd].sort(
+        (a, b) => new Date(a.receivingTime).getTime() - new Date(b.receivingTime).getTime()
+      );
+      if (bRecords.length > 0) {
+        firstStartIso = bRecords[0].receivingTime;
+      } else if (queueRec) {
+        firstStartIso = queueRec.gltReceivingTime || queueRec.createdAt;
+      }
+    }
 
     return {
-      joNumber: latestGLT.joNumber,
-      compGroup: latestGLT.compGroup || (isEngine ? 'Engine' : 'PT-PPM'),
-      unitModel: latestGLT.unitModel || '',
-      component: latestGLT.component || '',
-      productCategory: latestGLT.productCategory,
-      productModel: latestGLT.productModel,
-      assemblyMechanic: latestGLT.assemblyMechanic,
-      latestGLTResult: latestGLT.result,
-      gltIncomingTime: latestGLT.incomingTime,
-      gltSubmissionTime: latestGLT.submissionTime,
+      joNumber: latestGLT ? latestGLT.joNumber : (queueRec ? queueRec.joRoNumber : (existingDyno[0] || existingHyd[0]).joNumber),
+      compGroup,
+      unitModel,
+      component,
+      productCategory,
+      productModel,
+      assemblyMechanic,
+      latestGLTResult,
+      gltIncomingTime,
+      gltSubmissionTime,
+      firstStartIso,
       gltAttempts: glts.length,
       existingDynoAttempts: existingDyno.length,
       latestDynoRecord: existingDyno[existingDyno.length - 1] || null,
@@ -1378,7 +1664,7 @@ class DataStore {
       // Determine canonical line based on gltStatus and compGroup
       let canonicalLineId = q.currentTestingLineId || q.testingLineId;
       
-      if (q.gltStatus !== 'GOOD') {
+      if (q.gltStatus !== 'GOOD' && q.testType !== 'RETEST') {
         const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
         if (canonicalLineId !== gltLine) {
           canonicalLineId = gltLine;
@@ -1425,7 +1711,7 @@ class DataStore {
   public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
     // Assign canonical line before saving
     let canonicalLineId = record.currentTestingLineId || record.testingLineId;
-    if (record.gltStatus !== 'GOOD') {
+    if (record.gltStatus !== 'GOOD' && record.testType !== 'RETEST') {
       canonicalLineId = record.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
     } else {
       if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
@@ -1481,7 +1767,7 @@ class DataStore {
     const mergedRecord = { ...this.queueRecords[idx], ...updates };
     let canonicalLineId = updates.currentTestingLineId || updates.testingLineId || mergedRecord.currentTestingLineId || mergedRecord.testingLineId;
 
-    if (mergedRecord.gltStatus !== 'GOOD') {
+    if (mergedRecord.gltStatus !== 'GOOD' && mergedRecord.testType !== 'RETEST') {
       const gltLine = mergedRecord.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
       if (canonicalLineId !== gltLine) {
         canonicalLineId = gltLine;

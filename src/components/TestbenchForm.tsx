@@ -74,6 +74,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   const [plannedPriority, setPlannedPriority] = useState<number | undefined>(undefined);
   const [currentPriority, setCurrentPriority] = useState<number | undefined>(undefined);
   const [gltIncomingTime, setGltIncomingTime] = useState<string | null>(null);
+  const [firstStartIso, setFirstStartIso] = useState<string | null>(null);
   const [latestGLTResult, setLatestGLTResult] = useState<string | null>(null);
 
   // Form State
@@ -90,6 +91,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
 
   // Form Controls
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -174,9 +176,17 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
         if (res && res.gltIncomingTime) {
           setGltIncomingTime(res.gltIncomingTime);
         }
+        if (res && res.firstStartIso) {
+          setFirstStartIso(res.firstStartIso);
+        }
       });
     } else {
       setGltIncomingTime(null);
+      lookupJO(record.joRoNumber, 'Hydraulic Test').then((res) => {
+        if (res && res.firstStartIso) {
+          setFirstStartIso(res.firstStartIso);
+        }
+      });
     }
   };
 
@@ -197,8 +207,10 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
           setAssemblyMechanic(res.assemblyMechanic || '');
           setGltIncomingTime(res.gltIncomingTime || null);
           setLatestGLTResult(res.latestGLTResult || null);
+          setFirstStartIso(res.firstStartIso || null);
         } else {
           setLatestGLTResult(null);
+          setFirstStartIso(null);
         }
       });
     }
@@ -399,6 +411,11 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     }
 
     const answerSnapshots = buildAnswerSnapshots();
+    const subTime = new Date().toISOString();
+    const calculatedHydLeadTime = receivingTime
+      ? calculateMinutesBetween(firstStartIso || gltIncomingTime || receivingTime, subTime)
+      : undefined;
+
     const draftRecord: HydraulicRecord = {
       id: `hyd-draft-${Date.now()}`,
       joNumber: joNumber.trim().toUpperCase(),
@@ -413,9 +430,9 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       operatorName: currentUser.name,
       operatorId: currentUser.id,
       receivingTime: receivingTime || new Date().toISOString(),
-      submissionTime: new Date().toISOString(),
+      submissionTime: subTime,
       gltLeadTimeMinutes,
-      hydraulicLeadTimeMinutes,
+      hydraulicLeadTimeMinutes: calculatedHydLeadTime,
       result: finalResult,
       status: 'Draft',
       attemptNumber,
@@ -438,10 +455,12 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   };
 
   const handleFinalSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const submissionTime = new Date().toISOString();
       const finalLeadMinutes = receivingTime
-        ? calculateMinutesBetween(receivingTime, submissionTime)
+        ? calculateMinutesBetween(firstStartIso || gltIncomingTime || receivingTime, submissionTime)
         : 0;
 
       const answerSnapshots = buildAnswerSnapshots();
@@ -493,6 +512,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       console.error('Failed to submit Testbench record:', error);
       setValidationError(`Testbench Submission Failed: ${error?.message || 'Firestore write error'}`);
       setShowConfirmModal(false);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -997,9 +1018,12 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
               </button>
               <button
                 onClick={handleFinalSubmit}
-                className="flex-1 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold shadow-md"
+                disabled={isSubmitting}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold shadow-md text-white transition-colors ${
+                  isSubmitting ? 'bg-slate-400 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-700'
+                }`}
               >
-                Confirm & Submit
+                {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
               </button>
             </div>
           </div>

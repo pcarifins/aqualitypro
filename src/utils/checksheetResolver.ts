@@ -37,7 +37,7 @@ export function getCompatibleTemplates(
   const normProductComp = normalizeString(product.component);
   const normProductUnit = normalizeString(product.unitModel);
 
-  return templates.filter((t) => {
+  const matched = templates.filter((t) => {
     // 4. The checksheet is active.
     if (t.status !== 'ACTIVE') return false;
 
@@ -77,4 +77,43 @@ export function getCompatibleTemplates(
 
     return false;
   });
+
+  if (matched.length > 0) return matched;
+
+  // FALLBACK DYNAMIC GENERATION FOR 100% COVERAGE
+  // Find any active template for the same stage & compGroup as a base reference
+  const baseTmpl = templates.find((t) => {
+    if (t.status !== 'ACTIVE') return false;
+    const isStageMatch =
+      t.testStage === testStage ||
+      (testStage === 'Hydraulic Test' && t.testStage === 'Testbench') ||
+      (testStage === 'Testbench' && t.testStage === 'Hydraulic Test');
+    return isStageMatch && t.compGroup === product.compGroup;
+  }) || templates.find((t) => {
+    // Ultimate fallback if no matching compGroup template exists for this stage
+    if (t.status !== 'ACTIVE') return false;
+    const isStageMatch =
+      t.testStage === testStage ||
+      (testStage === 'Hydraulic Test' && t.testStage === 'Testbench') ||
+      (testStage === 'Testbench' && t.testStage === 'Hydraulic Test');
+    return isStageMatch;
+  });
+
+  if (baseTmpl) {
+    const fallbackTemplate: ChecksheetTemplate = {
+      ...baseTmpl,
+      id: `tmpl-fallback-${product.id}-${testStage.toLowerCase().replace(/\s+/g, '-')}`,
+      name: `${product.component} ${testStage} (Auto)`,
+      compGroup: product.compGroup,
+      unitModel: product.unitModel,
+      component: product.component,
+      productMasterId: product.id,
+      compatibleProductIds: [product.id],
+      status: 'ACTIVE',
+      sections: JSON.parse(JSON.stringify(baseTmpl.sections)),
+    };
+    return [fallbackTemplate];
+  }
+
+  return [];
 }

@@ -124,7 +124,13 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
                 const currentVal = answers[item.id] || '';
                 const currentRemark = itemRemarks[item.id] || '';
                 const isMandatory = !!item.mandatory;
-                const isMissingMandatory = validationAttempted && isMandatory && currentVal.trim() === '';
+                const isMissingMandatory =
+                  validationAttempted &&
+                  isMandatory &&
+                  (currentVal.trim() === '' ||
+                    (normType === 'NUMERIC' &&
+                      (!item.validation || item.validation === 'NONE') &&
+                      !answers[item.id + '_judgment']));
 
                 const numEval =
                   normType === 'NUMERIC'
@@ -225,7 +231,7 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
 
                         {/* 2. NUMERIC INPUT WITH UNIT & STATUS PILL */}
                         {normType === 'NUMERIC' && (
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                             <div className="relative">
                               <input
                                 type="number"
@@ -233,7 +239,7 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
                                 placeholder="Actual"
                                 value={currentVal}
                                 onChange={(e) => onAnswerChange(item.id, e.target.value)}
-                                className={`w-28 sm:w-32 bg-white border rounded-lg px-3 py-1.5 text-xs sm:text-sm text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs ${
+                                className={`w-24 sm:w-28 bg-white border rounded-lg px-2.5 py-1.5 text-xs sm:text-sm text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs ${
                                   isMissingMandatory
                                     ? 'border-rose-400 bg-rose-50/50'
                                     : 'border-slate-300'
@@ -242,7 +248,7 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
                             </div>
 
                             {item.unit && (
-                              <span className="text-xs font-semibold text-slate-500 font-mono min-w-[32px]">
+                              <span className="text-xs font-semibold text-slate-500 font-mono min-w-[24px]">
                                 {item.unit}
                               </span>
                             )}
@@ -258,6 +264,34 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
                               >
                                 {numEval.status}
                               </span>
+                            )}
+
+                            {/* Manual GOOD/NOT GOOD judgment for NUMERIC fields with no range standard */}
+                            {(!item.validation || item.validation === 'NONE') && (
+                              <div className="flex items-center space-x-1 border border-slate-100 bg-slate-50/50 p-1 rounded-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => onAnswerChange(item.id + '_judgment', 'GOOD')}
+                                  className={`px-2.5 py-1 rounded text-[10px] font-black tracking-wider transition-all border ${
+                                    answers[item.id + '_judgment'] === 'GOOD'
+                                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  GOOD
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onAnswerChange(item.id + '_judgment', 'NOT GOOD')}
+                                  className={`px-2.5 py-1 rounded text-[10px] font-black tracking-wider transition-all border ${
+                                    answers[item.id + '_judgment'] === 'NOT GOOD'
+                                      ? 'bg-rose-600 border-rose-600 text-white shadow-xs'
+                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  NG
+                                </button>
+                              </div>
                             )}
                           </div>
                         )}
