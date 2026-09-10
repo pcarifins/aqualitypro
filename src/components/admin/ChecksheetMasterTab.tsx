@@ -1084,6 +1084,7 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
                   >
                     <option value="GOOD / NOT GOOD">GOOD / NOT GOOD (Judgment)</option>
                     <option value="Numeric">Numeric (Value Measurement)</option>
+                    <option value="Dropdown">Dropdown (YES / NO)</option>
                     <option value="Visual">Visual (Check Only)</option>
                   </select>
                 </div>

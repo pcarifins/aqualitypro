@@ -52,6 +52,11 @@ export function getCompatibleTemplates(
     if (t.compGroup && t.compGroup !== product.compGroup) return false;
 
     // Match compatibility:
+    // Priority 1A: compatibleProductIds array direct link
+    if (t.compatibleProductIds && t.compatibleProductIds.includes(product.id)) {
+      return true;
+    }
+
     // Priority 1: stable productMasterId
     if (t.productMasterId && t.productMasterId === product.id) {
       return true;

@@ -8,6 +8,7 @@ import {
   DynotestRecord,
   HydraulicRecord,
 } from '../types';
+import { getFifteenTemplates } from './fifteenTemplates';
 
 // 1. AUTH USERS (Admin, Supervisor, PPC, GLT_OPT, DYNO_OPT, TESTBENCH_OPT)
 export const initialUsers: User[] = [
@@ -584,6 +585,7 @@ export const initialProductModels: ProductModel[] = [
 // Demonstrates component-specific checksheets (MAIN PUMP vs SWING MOTOR vs Engine Assembly)
 // and NUMERIC without standard (validation: 'NONE').
 export const initialChecksheetTemplates: ChecksheetTemplate[] = [
+  ...getFifteenTemplates(initialProductModels),
   // --- TEMPLATE 1: PT-PPM / MAIN PUMP (Hydraulic Test) ---
   {
     id: 'tmpl-mp-hyd-v1',

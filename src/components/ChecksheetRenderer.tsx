@@ -2,7 +2,7 @@ import React from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, HelpCircle } from 'lucide-react';
 import { ChecksheetItem, ChecksheetAnswer } from '../types';
 
-export type NormalizedInputType = 'GOOD_NOT_GOOD' | 'NUMERIC' | 'TEXT' | 'YES_NO';
+export type NormalizedInputType = 'GOOD_NOT_GOOD' | 'NUMERIC' | 'TEXT' | 'YES_NO' | 'DROPDOWN';
 
 export function normalizeInputType(type?: string): NormalizedInputType {
   if (!type) return 'TEXT';
@@ -10,6 +10,7 @@ export function normalizeInputType(type?: string): NormalizedInputType {
   if (clean.includes('GOOD') || clean.includes('NG')) return 'GOOD_NOT_GOOD';
   if (clean.includes('NUM') || clean.includes('NUMBER')) return 'NUMERIC';
   if (clean.includes('YES') || clean.includes('NO')) return 'YES_NO';
+  if (clean.includes('DROP') || clean.includes('SELECT')) return 'DROPDOWN';
   return 'TEXT';
 }
 
@@ -303,6 +304,26 @@ export const ChecksheetRenderer: React.FC<ChecksheetRendererProps> = ({
                                 : 'border-slate-300'
                             }`}
                           />
+                        )}
+
+                        {/* 5. DROPDOWN INPUT */}
+                        {normType === 'DROPDOWN' && (
+                          <select
+                            value={currentVal}
+                            onChange={(e) => onAnswerChange(item.id, e.target.value)}
+                            className={`w-44 bg-white border rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs font-bold ${
+                              isMissingMandatory
+                                ? 'border-rose-400 bg-rose-50/50'
+                                : 'border-slate-300'
+                            }`}
+                          >
+                            <option value="">-- Select --</option>
+                            {(item.options || ['YES', 'NO']).map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </div>
                     </div>

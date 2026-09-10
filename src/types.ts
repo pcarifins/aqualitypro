@@ -58,7 +58,9 @@ export type TrialInputType =
   | 'GOOD / NOT GOOD'
   | 'Numeric'
   | 'Text'
-  | 'Yes / No';
+  | 'Yes / No'
+  | 'Dropdown'
+  | 'DROPDOWN';
 
 export type NumericValidationType =
   | 'NONE'
@@ -141,6 +143,7 @@ export interface ChecksheetTemplate {
   unitModel: string; // Specific unit e.g. "PC200-8", "PC400-8", "HD785-7", or "ALL"
   component: string; // Specific component e.g. "MAIN PUMP", "SWING MOTOR", "Engine Assembly"
   productMasterId?: string; // Direct link to ProductModel ID
+  compatibleProductIds?: string[]; // Direct links to all compatible ProductModel IDs
   testStage: TestProcess;
   revision: number;
   status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
