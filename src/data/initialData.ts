@@ -7,8 +7,12 @@ import {
   GLTRecord,
   DynotestRecord,
   HydraulicRecord,
+  FinalTestTemplateRelationship,
+  ChecksheetStandardProfile,
 } from '../types';
 import { getFifteenTemplates } from './fifteenTemplates';
+import { INITIAL_TEMPLATE_RELATIONSHIPS } from './relationshipsMaster';
+import { INITIAL_STANDARD_PROFILES } from './standardProfilesMaster';
 
 // 1. AUTH USERS (Admin, Supervisor, PPC, GLT_OPT, DYNO_OPT, TESTBENCH_OPT)
 export const initialUsers: User[] = [
@@ -580,6 +584,10 @@ export const initialProductModels: ProductModel[] = [
     active: true,
   },
 ];
+
+// 3.5. STANDARD PROFILES & RELATIONSHIPS
+export const initialStandardProfiles: ChecksheetStandardProfile[] = INITIAL_STANDARD_PROFILES;
+export const initialTemplateRelationships: FinalTestTemplateRelationship[] = INITIAL_TEMPLATE_RELATIONSHIPS;
 
 // 4. CHECKSHEET TEMPLATES
 // Demonstrates component-specific checksheets (MAIN PUMP vs SWING MOTOR vs Engine Assembly)

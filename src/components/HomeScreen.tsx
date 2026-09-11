@@ -100,7 +100,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     testType?: 'PROD' | 'RETEST',
     gltStatus?: string
   ) => {
-    if (testType === 'RETEST') {
+    if (compGroup === 'Cylinder' || testType === 'RETEST') {
       if (compGroup === 'Engine') {
         onNavigate('dyno', joNumber);
       } else {

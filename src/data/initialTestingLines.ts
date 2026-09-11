@@ -55,10 +55,10 @@ export const initialTestingLines: TestingLine[] = [
     updatedAt: '2026-03-01T00:00:00Z',
   },
 
-  // PT / CYLINDER LINES
+  // PT-PPM LINES
   {
-    id: 'glt-pt-cyl',
-    name: 'GLT PT-CYL',
+    id: 'glt-pt-ppm',
+    name: 'GLT PT-PPM',
     process: 'GLT',
     componentGroup: 'PT-PPM',
     active: true,

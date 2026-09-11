@@ -21,6 +21,8 @@ import {
 import { INITIAL_REQUIRED_PRODUCT_MODELS } from '../data/productMasterSeed';
 import { initialQueueRecords } from '../data/initialQueueData';
 import { initialTestingLines } from '../data/initialTestingLines';
+import { INITIAL_STANDARD_PROFILES } from '../data/standardProfilesMaster';
+import { INITIAL_TEMPLATE_RELATIONSHIPS } from '../data/relationshipsMaster';
 
 export enum OperationType {
   CREATE = 'create',
@@ -355,89 +357,26 @@ export async function initializeAndMigrateFirestore(): Promise<{
 
     // 11. Standard Profiles
     const existingProfiles = await fetchCollection<any>('standardProfiles');
-    const existingProfileIds = new Set(existingProfiles.map((p) => p.profileId));
-    const initialProfiles = [
-      {
-        profileId: 'prof-engine-std',
-        name: 'Std Engine Test Profile',
-        maxAllowableLoad: 450,
-        targetFlowRates: 'N/A',
-        torqueLimits: 'Min 1200 Nm, Max 2500 Nm',
-        vibrationThresholds: 'Max 4.5 mm/s',
-        notes: 'Standard profile for high-power diesel engine units.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        profileId: 'prof-pump-std',
-        name: 'Std Hydraulic Pump Profile',
-        maxAllowableLoad: 350,
-        targetFlowRates: '350 L/min',
-        torqueLimits: 'Min 800 Nm, Max 1800 Nm',
-        vibrationThresholds: 'Max 2.5 mm/s',
-        notes: 'Standard profile for piston pump assemblies.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        profileId: 'prof-cylinder-std',
-        name: 'Std Cylinder Profile',
-        maxAllowableLoad: 250,
-        targetFlowRates: '200 L/min',
-        torqueLimits: 'N/A',
-        vibrationThresholds: 'Max 1.5 mm/s',
-        notes: 'Standard profile for heavy double-acting cylinders.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ];
-    for (const p of initialProfiles) {
-      if (!existingProfileIds.has(p.profileId)) {
+    const existingProfileIds = new Set(existingProfiles.map((p) => p.standardProfileId || p.profileId || p.id));
+    for (const p of INITIAL_STANDARD_PROFILES) {
+      const pId = p.standardProfileId || p.profileId || p.id;
+      if (!existingProfileIds.has(pId)) {
         console.log(`Restoring missing standard profile: ${p.name}`);
         await saveDocument('standardProfiles', p);
+        await saveDocument('checksheetStandardProfiles', p);
         restoredCount++;
       }
     }
 
-    // 12. Template Relationships
+    // 12. Template Relationships (All 169 authoritative products)
     const existingRelationships = await fetchCollection<any>('templateRelationships');
-    const existingRelationshipIds = new Set(existingRelationships.map((r) => r.relationshipId));
-    const initialRelationships = [
-      {
-        relationshipId: 'rel-engine-hd785',
-        productId: 'prod-01',
-        componentName: 'ENGINE ASSY',
-        unitModel: 'HD785-7',
-        productGroup: 'Engine',
-        finalProcess: 'DYNOTEST',
-        templateId: 'tmpl-dyno-hd785',
-        standardProfileId: 'prof-engine-std',
-        compatibleLineIds: ['dyno-1', 'dyno-2'],
-        status: 'ACTIVE',
-        version: 1,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        relationshipId: 'rel-pump-pc1250',
-        productId: 'prod-04',
-        componentName: 'MAIN PUMP NO 1',
-        unitModel: 'PC1250SP-8R',
-        productGroup: 'PT-PPM',
-        finalProcess: 'TESTBENCH',
-        templateId: 'tmpl-tb-pump-pc1250',
-        standardProfileId: 'prof-pump-std',
-        compatibleLineIds: ['tb-1', 'tb-2'],
-        status: 'ACTIVE',
-        version: 1,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ];
-    for (const r of initialRelationships) {
-      if (!existingRelationshipIds.has(r.relationshipId)) {
+    const existingRelationshipIds = new Set(existingRelationships.map((r) => r.relationshipId || r.id));
+    for (const r of INITIAL_TEMPLATE_RELATIONSHIPS) {
+      const rId = r.relationshipId || r.id;
+      if (!existingRelationshipIds.has(rId)) {
         console.log(`Restoring missing template relationship: ${r.relationshipId}`);
         await saveDocument('templateRelationships', r);
+        await saveDocument('finalTestTemplateRelationships', r);
         restoredCount++;
       }
     }
@@ -445,10 +384,11 @@ export async function initializeAndMigrateFirestore(): Promise<{
     // Mark migration completed / audited in Firestore
     const migrationDocRef = doc(db, 'systemConfig', 'databaseMigration');
     await setDoc(migrationDocRef, {
-      version: 'firestore-first-v2',
+      version: 'firestore-relationships-architecture-v1',
       completed: true,
       completedAt: new Date().toISOString(),
-      migratedBy: 'idempotent-audit-and-recovery-engine',
+      migratedBy: 'idempotent-relationship-architecture-sync-engine',
+      totalActiveRelationships: INITIAL_TEMPLATE_RELATIONSHIPS.length,
       lastAuditRestoredCount: restoredCount,
     });
 

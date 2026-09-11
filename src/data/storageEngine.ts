@@ -1694,9 +1694,9 @@ class DataStore {
       let canonicalLineId = q.currentTestingLineId || q.testingLineId;
       let schedulingWarning: string | undefined = undefined;
       
-      // 1. If GLT is not GOOD and not RETEST, it must be on GLT line first
-      if (q.gltStatus !== 'GOOD' && q.testType !== 'RETEST') {
-        const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+      // 1. If GLT is not GOOD and not RETEST, it must be on GLT line first (Cylinder is excluded from GLT)
+      if (q.compGroup !== 'Cylinder' && q.gltStatus !== 'GOOD' && q.testType !== 'RETEST') {
+        const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-ppm';
         if (canonicalLineId !== gltLine) {
           canonicalLineId = gltLine;
         }
@@ -1842,10 +1842,10 @@ class DataStore {
   public async addQueueRecord(record: QueueRecord, actorName = 'PPC'): Promise<void> {
     // Assign canonical line before saving
     let canonicalLineId = record.currentTestingLineId || record.testingLineId;
-    if (record.gltStatus !== 'GOOD' && record.testType !== 'RETEST') {
-      canonicalLineId = record.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+    if (record.compGroup !== 'Cylinder' && record.gltStatus !== 'GOOD' && record.testType !== 'RETEST') {
+      canonicalLineId = record.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-ppm';
     } else {
-      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl' || canonicalLineId === 'glt-pt-ppm') {
         if (record.compGroup === 'Engine') {
           canonicalLineId = 'dyno-1';
         } else if (record.compGroup === 'Cylinder') {
@@ -1899,13 +1899,13 @@ class DataStore {
     const mergedRecord = { ...this.queueRecords[idx], ...updates };
     let canonicalLineId = updates.currentTestingLineId || updates.testingLineId || mergedRecord.currentTestingLineId || mergedRecord.testingLineId;
 
-    if (mergedRecord.gltStatus !== 'GOOD' && mergedRecord.testType !== 'RETEST') {
-      const gltLine = mergedRecord.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-cyl';
+    if (mergedRecord.compGroup !== 'Cylinder' && mergedRecord.gltStatus !== 'GOOD' && mergedRecord.testType !== 'RETEST') {
+      const gltLine = mergedRecord.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-ppm';
       if (canonicalLineId !== gltLine) {
         canonicalLineId = gltLine;
       }
     } else {
-      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl') {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl' || canonicalLineId === 'glt-pt-ppm') {
         if (mergedRecord.compGroup === 'Engine') {
           canonicalLineId = 'dyno-1';
         } else if (mergedRecord.compGroup === 'Cylinder') {
@@ -2212,6 +2212,7 @@ class DataStore {
   public async saveTemplateRelationship(rel: TemplateRelationship, actorName = 'Admin'): Promise<void> {
     const isNew = !this.templateRelationships.some((r) => r.relationshipId === rel.relationshipId);
     await saveDocument('templateRelationships', rel);
+    await saveDocument('finalTestTemplateRelationships', rel);
     const idx = this.templateRelationships.findIndex((r) => r.relationshipId === rel.relationshipId);
     if (idx >= 0) {
       this.templateRelationships[idx] = rel;
@@ -2232,6 +2233,7 @@ class DataStore {
 
   public async deleteTemplateRelationship(id: string, actorName = 'Admin'): Promise<void> {
     await removeDocument('templateRelationships', id);
+    await removeDocument('finalTestTemplateRelationships', id);
     this.templateRelationships = this.templateRelationships.filter((r) => r.relationshipId !== id);
     this.saveToStorageCache();
 
@@ -2253,6 +2255,7 @@ class DataStore {
   public async saveStandardProfile(prof: StandardProfile, actorName = 'Admin'): Promise<void> {
     const isNew = !this.standardProfiles.some((p) => p.profileId === prof.profileId);
     await saveDocument('standardProfiles', prof);
+    await saveDocument('checksheetStandardProfiles', prof);
     const idx = this.standardProfiles.findIndex((p) => p.profileId === prof.profileId);
     if (idx >= 0) {
       this.standardProfiles[idx] = prof;
@@ -2273,6 +2276,7 @@ class DataStore {
 
   public async deleteStandardProfile(id: string, actorName = 'Admin'): Promise<void> {
     await removeDocument('standardProfiles', id);
+    await removeDocument('checksheetStandardProfiles', id);
     this.standardProfiles = this.standardProfiles.filter((p) => p.profileId !== id);
     this.saveToStorageCache();
 

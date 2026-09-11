@@ -227,6 +227,8 @@
     "systemConfig": { "schema": "SystemConfig", "description": "System configuration collection" },
     "testingLines": { "schema": "TestingLine", "description": "Testing lines and capacity configuration collection" },
     "templateRelationships": { "schema": "TemplateRelationship", "description": "Product and template relationship mappings" },
-    "standardProfiles": { "schema": "StandardProfile", "description": "Standard standard profiles master" }
+    "finalTestTemplateRelationships": { "schema": "TemplateRelationship", "description": "Active product and final-test template relationship mappings" },
+    "standardProfiles": { "schema": "StandardProfile", "description": "Standard standard profiles master" },
+    "checksheetStandardProfiles": { "schema": "StandardProfile", "description": "Unit Model checksheet standard profile limits" }
   }
 }

@@ -103,6 +103,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
         if (q.compGroup === 'Engine') return false;
         if (q.status === 'FINISH') return false;
         if (q.testType === 'RETEST') return true;
+        // Cylinder is excluded from GLT and is eligible directly for Testbench
+        if (q.compGroup === 'Cylinder') return true;
         return q.gltStatus === 'GOOD';
       });
       setQueueRecords(eligible);

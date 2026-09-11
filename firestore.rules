@@ -65,6 +65,22 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /templateRelationships/{relationshipId} {
+      allow read, write: if true;
+    }
+
+    match /finalTestTemplateRelationships/{relationshipId} {
+      allow read, write: if true;
+    }
+
+    match /standardProfiles/{profileId} {
+      allow read, write: if true;
+    }
+
+    match /checksheetStandardProfiles/{profileId} {
+      allow read, write: if true;
+    }
+
     match /_sync_test/{testId} {
       allow read, write: if true;
     }

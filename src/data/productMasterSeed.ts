@@ -7,6 +7,8 @@ export interface RequiredProductDefinition {
   component: string;
 }
 
+export type ProductDefinition = RequiredProductDefinition;
+
 // 6A. ENGINE PRODUCT MASTER (23 items)
 export const REQUIRED_ENGINE_PRODUCTS: RequiredProductDefinition[] = [
   { compGroup: 'Engine', subGroup: null, unitModel: 'D155A-6R', component: 'ENGINE ASSY' },

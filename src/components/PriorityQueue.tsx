@@ -611,11 +611,9 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                 (l) => l.active && (l.componentGroup === selectedCompGroup || !l.componentGroup)
               );
 
-              const filteredLines = item.testType === 'PROD'
-                ? (item.gltStatus === 'GOOD'
-                  ? activeLinesForGroup.filter((l) => l.process !== 'GLT')
-                  : activeLinesForGroup.filter((l) => l.process === 'GLT'))
-                : activeLinesForGroup;
+              const filteredLines = item.compGroup === 'Cylinder' || item.testType === 'RETEST' || item.gltStatus === 'GOOD'
+                ? activeLinesForGroup.filter((l) => l.process !== 'GLT')
+                : activeLinesForGroup.filter((l) => l.process === 'GLT');
 
               return (
                 <div

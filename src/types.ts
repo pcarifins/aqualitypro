@@ -209,25 +209,51 @@ export interface TestingLine {
   unavailableReason?: string;
 }
 
-export interface StandardProfile {
-  profileId: string;
+export interface CheckingPointStandard {
+  itemId: string;
+  itemName?: string;
+  unit?: string;
+  validationType?: NumericValidationType | 'RANGE' | 'MINIMUM' | 'MAXIMUM' | 'EXACT' | 'NONE';
+  minimumValue?: number;
+  maximumValue?: number;
+  targetValue?: number | string;
+  toleranceValue?: number | string;
+  mandatory?: boolean;
+}
+
+export interface ChecksheetStandardProfile {
+  id?: string;
+  standardProfileId: string;
+  profileId?: string; // Compatibility alias
   name: string;
+  templateId: string;
+  componentFamily?: string;
+  unitModel: string;
+  revision: number;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  effectiveDate?: string;
+  approvedBy?: string;
+  approvedDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  checkingPointStandards?: CheckingPointStandard[];
   maxAllowableLoad?: number;
   targetFlowRates?: string;
   torqueLimits?: string;
   vibrationThresholds?: string;
   notes?: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
-export interface TemplateRelationship {
+export type StandardProfile = ChecksheetStandardProfile;
+
+export interface FinalTestTemplateRelationship {
   id?: string;
   relationshipId: string;
   productId: string;
   componentName: string;
   unitModel: string;
   productGroup: string;
+  subGroup?: string | null;
   finalProcess: 'DYNOTEST' | 'TESTBENCH' | 'Dynotest' | 'Testbench';
   templateId: string;
   templateName?: string;
@@ -241,6 +267,8 @@ export interface TemplateRelationship {
   createdAt: string;
   updatedAt: string;
 }
+
+export type TemplateRelationship = FinalTestTemplateRelationship;
 
 export interface TestOverride {
   id: string;
@@ -328,9 +356,13 @@ export interface QualityCertificateRecord {
 
 // Immutable Snapshot captured at test start/submission
 export interface ChecksheetSnapshot {
+  relationshipId?: string;
+  relationshipVersion?: number;
   templateId: string;
   templateName: string;
   revision: number;
+  standardProfileId?: string;
+  standardProfileRevision?: number;
   compGroup: string;
   unitModel: string;
   component: string;
@@ -347,12 +379,14 @@ export interface ChecksheetSnapshot {
       validation: NumericValidationType;
       minimumValue?: number;
       maximumValue?: number;
-      targetValue?: number;
-      toleranceValue?: number;
+      targetValue?: number | string;
+      toleranceValue?: number | string;
       displayOrder: number;
       mandatory: boolean;
     }[];
   }[];
+  standardValues?: Record<string, any>;
+  calculationProfileVersion?: number | string;
   snapshottedAt: string;
 }
 
@@ -450,6 +484,9 @@ export interface DynotestRecord {
   dynoLeadTimeMinutes?: number; // Calculated: submissionTime - receivingTime
   answers?: ChecksheetAnswer[];
   snapshot?: ChecksheetSnapshot;
+  relationshipStatus?: 'ACTIVE' | 'UNCONFIGURED' | 'REVIEW_REQUIRED';
+  templateMode?: 'STANDARD' | 'PERFORMANCE_ONLY';
+  contingencyReason?: string;
   photoUrl?: string;
   attachments?: Attachment[];
 }
@@ -483,6 +520,9 @@ export interface HydraulicRecord {
   hydraulicLeadTimeMinutes?: number; // Calculated: submissionTime - receivingTime
   answers?: ChecksheetAnswer[];
   snapshot?: ChecksheetSnapshot;
+  relationshipStatus?: 'ACTIVE' | 'UNCONFIGURED' | 'REVIEW_REQUIRED';
+  templateMode?: 'STANDARD' | 'PERFORMANCE_ONLY';
+  contingencyReason?: string;
   photoUrl?: string;
   attachments?: Attachment[];
 }
