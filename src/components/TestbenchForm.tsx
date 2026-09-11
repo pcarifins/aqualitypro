@@ -219,7 +219,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   };
 
   const handleReceiveAtTestbench = async () => {
-    if (testType === 'PROD') {
+    if (testType === 'PROD' && compGroup !== 'Cylinder') {
       if (!latestGLTResult) {
         setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
         return;
@@ -311,7 +311,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       return false;
     }
 
-    if (testType === 'PROD') {
+    if (testType === 'PROD' && compGroup !== 'Cylinder') {
       if (!latestGLTResult) {
         setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
         return false;

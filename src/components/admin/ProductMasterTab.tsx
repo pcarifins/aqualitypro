@@ -51,9 +51,9 @@ export const ProductMasterTab: React.FC<ProductMasterTabProps> = ({
   const handleBulkActivateChecksheets = async () => {
     setIsBulkActivating(true);
     try {
-      const res = await apiClient.ensureStarterChecksheetsForAllActiveProducts();
+      const res = await apiClient.ensureProductionTemplates();
       setBulkSuccessMsg(
-        `Successfully activated ${res.createdCount} starter checksheet templates across all 169 Product Master models!`
+        `Production checksheet architecture synced: ${res.activeTemplateCount} active production templates (Universal GLT & Shared Final Tests) across 169 Product Master models!`
       );
       setTimeout(() => setBulkSuccessMsg(null), 6000);
     } catch (e) {
@@ -154,7 +154,7 @@ export const ProductMasterTab: React.FC<ProductMasterTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 169 Product Master Compliance & Starter Generator Banner */}
+      {/* 169 Product Master Compliance & Production Checksheet Relationships */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-800/60 rounded-2xl p-4 text-white shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-start space-x-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/40 flex items-center justify-center font-black shrink-0 mt-0.5">
@@ -163,7 +163,7 @@ export const ProductMasterTab: React.FC<ProductMasterTabProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <h3 className="text-sm font-bold text-slate-100">
-                169-Model Product Master Database & Starter Checksheets
+                169-Model Product Master Database & Production Checksheets
               </h3>
               <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
                 {totalCount >= 169 ? 'Complete (169 Models)' : `${totalCount} Models`}
@@ -172,7 +172,7 @@ export const ProductMasterTab: React.FC<ProductMasterTabProps> = ({
             <p className="text-xs text-slate-300 mt-1">
               Active configuration: <strong className="text-blue-300">{engineCount} Engines</strong>,{' '}
               <strong className="text-purple-300">{ptPpmCount} PT-PPM</strong>, and{' '}
-              <strong className="text-amber-300">{cylinderCount} Cylinders</strong>. Auto-linked to multi-stage checksheets.
+              <strong className="text-amber-300">{cylinderCount} Cylinders</strong>. Auto-linked to production checksheets.
             </p>
           </div>
         </div>
@@ -184,7 +184,7 @@ export const ProductMasterTab: React.FC<ProductMasterTabProps> = ({
           className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center space-x-2 shrink-0"
         >
           <CheckCheck className="w-4 h-4" />
-          <span>{isBulkActivating ? 'Activating...' : 'Bulk Activate Starter Checksheets'}</span>
+          <span>{isBulkActivating ? 'Syncing...' : 'Sync Production Templates'}</span>
         </button>
       </div>
 

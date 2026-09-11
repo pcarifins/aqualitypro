@@ -343,7 +343,17 @@ class DataStore {
       this.models = m ? JSON.parse(m) : [...initialProductModels, ...INITIAL_REQUIRED_PRODUCT_MODELS];
 
       const t = getStorage(STORAGE_KEYS.TEMPLATES);
-      this.templates = t ? JSON.parse(t) : [...initialChecksheetTemplates];
+      const parsedTemplates: ChecksheetTemplate[] = t ? JSON.parse(t) : [...initialChecksheetTemplates];
+      // Filter out any legacy starter templates completely
+      this.templates = parsedTemplates.filter(
+        (tmpl) =>
+          !tmpl.id.startsWith('tmpl-starter-') &&
+          !tmpl.name.toLowerCase().includes('starter checksheet') &&
+          !tmpl.name.toLowerCase().includes('trial checksheet')
+      );
+      if (this.templates.length === 0) {
+        this.templates = [...initialChecksheetTemplates];
+      }
 
       const c = getStorage(STORAGE_KEYS.CHECKSHEETS);
       this.checksheets = c ? JSON.parse(c) : [...initialChecksheetItems];
@@ -378,8 +388,8 @@ class DataStore {
       const prof = getStorage(STORAGE_KEYS.STANDARD_PROFILES);
       this.standardProfiles = prof ? JSON.parse(prof) : [];
 
-      // Idempotently guarantee 100% active templates are pre-populated and cached
-      this.ensureStarterChecksheetsForAllActiveProducts();
+      // Guarantee production checksheet architecture (2 GLT + 15 Shared Final + 1 Contingency)
+      this.ensureProductionTemplates();
     } catch {
       this.resetToDefault();
     }
@@ -650,337 +660,46 @@ class DataStore {
     };
   }
 
+  public ensureProductionTemplates(): {
+    activeTemplateCount: number;
+    purgedStarterCount: number;
+  } {
+    const prevCount = this.templates.length;
+    // Purge all starter/trial templates completely
+    this.templates = this.templates.filter(
+      (tmpl) =>
+        !tmpl.id.startsWith('tmpl-starter-') &&
+        !tmpl.name.toLowerCase().includes('starter checksheet') &&
+        !tmpl.name.toLowerCase().includes('trial checksheet')
+    );
+
+    // Ensure all 18 production templates exist and are ACTIVE
+    initialChecksheetTemplates.forEach((defTmpl) => {
+      const idx = this.templates.findIndex((t) => t.id === defTmpl.id);
+      if (idx >= 0) {
+        this.templates[idx] = { ...defTmpl, status: 'ACTIVE' };
+      } else {
+        this.templates.push({ ...defTmpl, status: 'ACTIVE' });
+      }
+    });
+
+    const purgedStarterCount = prevCount - this.templates.length;
+    this.saveToStorageCache();
+    this.notifyListeners();
+    return { activeTemplateCount: this.templates.length, purgedStarterCount };
+  }
+
   public ensureStarterChecksheetsForAllActiveProducts(): {
     createdCount: number;
     alreadyExistingCount: number;
   } {
-    let createdCount = 0;
-    let alreadyExistingCount = 0;
-
-    this.models.forEach((model) => {
-      if (!model.active) return;
-
-      const testStage: TestProcess =
-        model.compGroup === 'Engine'
-          ? 'Dynotest'
-          : 'Hydraulic Test';
-
-      const existing = this.templates.find(
-        (t) =>
-          t.compGroup === model.compGroup &&
-          t.component.toLowerCase() === model.component.toLowerCase() &&
-          (t.unitModel === model.unitModel || t.unitModel === 'ALL')
-      );
-
-      if (!existing) {
-        createdCount++;
-        
-        let sections: ChecksheetSection[] = [];
-        
-        if (model.compGroup === 'Cylinder') {
-          // Cylinder Template - 7 items
-          sections = [
-            {
-              id: `sec-vis-${model.id}`,
-              name: 'Visual & Pre-Test Inspection',
-              displayOrder: 1,
-              items: [
-                {
-                  id: `itm-cyl-vis-1-${model.id}`,
-                  itemName: 'Cylinder Tube & Rod Surface Finish',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-cyl-vis-2-${model.id}`,
-                  itemName: 'Seal and Wiper Ring Inspection',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                }
-              ]
-            },
-            {
-              id: `sec-func-${model.id}`,
-              name: 'Functional Check',
-              displayOrder: 2,
-              items: [
-                {
-                  id: `itm-cyl-fn-1-${model.id}`,
-                  itemName: 'Full Stroke Travel & Smoothness',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-cyl-fn-2-${model.id}`,
-                  itemName: 'Cushioning Valve Operation',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                }
-              ]
-            },
-            {
-              id: `sec-meas-${model.id}`,
-              name: 'Operating Parameters',
-              displayOrder: 3,
-              items: [
-                {
-                  id: `itm-cyl-ms-1-${model.id}`,
-                  itemName: 'Rod-End Oil Pressure',
-                  inputType: 'NUMERIC',
-                  unit: 'bar',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-cyl-ms-2-${model.id}`,
-                  itemName: 'Head-End Oil Pressure',
-                  inputType: 'NUMERIC',
-                  unit: 'bar',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-cyl-ms-3-${model.id}`,
-                  itemName: 'Internal Leakage Rate',
-                  inputType: 'NUMERIC',
-                  unit: 'cc/min',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: false,
-                }
-              ]
-            }
-          ];
-        } else if (model.compGroup === 'PT-PPM') {
-          // PT or PPM Template - 10 items (8 to 15)
-          sections = [
-            {
-              id: `sec-vis-${model.id}`,
-              name: 'Visual & Pre-Test Inspection',
-              displayOrder: 1,
-              items: [
-                {
-                  id: `itm-vis-1-${model.id}`,
-                  itemName: 'Cleanliness & Foreign Object Inspection',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-vis-2-${model.id}`,
-                  itemName: 'Fasteners & Bolt Torque Verification',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-vis-3-${model.id}`,
-                  itemName: 'Part Number & Serial Number Verification',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-vis-4-${model.id}`,
-                  itemName: 'Seal, O-Ring & Gasket Placement Check',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 4,
-                  active: true,
-                  mandatory: true,
-                }
-              ]
-            },
-            {
-              id: `sec-fn-${model.id}`,
-              name: 'Functional Check',
-              displayOrder: 2,
-              items: [
-                {
-                  id: `itm-fn-1-${model.id}`,
-                  itemName: 'Shaft Rotation & Backlash Inspection',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-fn-2-${model.id}`,
-                  itemName: 'Solenoid & Sensor Functional Test',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-fn-3-${model.id}`,
-                  itemName: 'Internal Clutch / Gear Engagement Check',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: true,
-                }
-              ]
-            },
-            {
-              id: `sec-perf-${model.id}`,
-              name: 'Operating & Performance Parameters',
-              displayOrder: 3,
-              items: [
-                {
-                  id: `itm-perf-1-${model.id}`,
-                  itemName: 'Main Pressure / Load Check',
-                  inputType: 'NUMERIC',
-                  unit: 'bar',
-                  validation: 'RANGE',
-                  minimumValue: 150,
-                  maximumValue: 350,
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-perf-2-${model.id}`,
-                  itemName: 'Oil Temp Check',
-                  inputType: 'NUMERIC',
-                  unit: '°C',
-                  validation: 'RANGE',
-                  minimumValue: 40,
-                  maximumValue: 95,
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: false,
-                },
-                {
-                  id: `itm-perf-3-${model.id}`,
-                  itemName: 'Oil Leakage Check under Load',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 3,
-                  active: true,
-                  mandatory: true,
-                }
-              ]
-            }
-          ];
-        } else {
-          // Engine - default 3 items
-          sections = [
-            {
-              id: `sec-vis-${model.id}`,
-              name: 'Visual & Pre-Test Inspection',
-              displayOrder: 1,
-              items: [
-                {
-                  id: `itm-vis-1-${model.id}`,
-                  itemName: 'Cleanliness & Foreign Object Inspection',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-                {
-                  id: `itm-vis-2-${model.id}`,
-                  itemName: 'Fasteners & Bolt Torque Verification',
-                  inputType: 'GOOD / NOT GOOD',
-                  validation: 'NONE',
-                  displayOrder: 2,
-                  active: true,
-                  mandatory: true,
-                },
-              ],
-            },
-            {
-              id: `sec-perf-${model.id}`,
-              name: 'Operating & Performance Parameters',
-              displayOrder: 2,
-              items: [
-                {
-                  id: `itm-perf-1-${model.id}`,
-                  itemName: 'Operating Pressure / Load Check',
-                  inputType: 'NUMERIC',
-                  unit: 'kW',
-                  validation: 'RANGE',
-                  minimumValue: 100,
-                  maximumValue: 500,
-                  displayOrder: 1,
-                  active: true,
-                  mandatory: true,
-                },
-              ],
-            },
-          ];
-        }
-
-        const starterTemplate: ChecksheetTemplate = {
-          id: `tmpl-starter-${model.id}`,
-          name: `${model.unitModel} / ${model.component} Starter Checksheet`,
-          compGroup: model.compGroup,
-          productMasterId: model.id,
-          unitModel: model.unitModel,
-          component: model.component,
-          testStage,
-          revision: 1,
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          sections,
-        };
-        this.templates.push(starterTemplate);
-        saveDocument('checksheetTemplates', starterTemplate);
-      } else {
-        alreadyExistingCount++;
-      }
-    });
-
-    this.saveToStorageCache();
-    this.notifyListeners();
-    return { createdCount, alreadyExistingCount };
+    const res = this.ensureProductionTemplates();
+    return { createdCount: res.activeTemplateCount, alreadyExistingCount: res.activeTemplateCount };
   }
 
   public bulkActivateStarterTemplates(): number {
-    let activatedCount = 0;
-    this.templates.forEach((t) => {
-      if (t.status === 'DRAFT') {
-        t.status = 'ACTIVE';
-        t.activatedAt = new Date().toISOString();
-        t.updatedAt = new Date().toISOString();
-        saveDocument('checksheetTemplates', t);
-        activatedCount++;
-      }
-    });
-    if (activatedCount > 0) {
-      this.saveToStorageCache();
-      this.notifyListeners();
-    }
-    return activatedCount;
+    const res = this.ensureProductionTemplates();
+    return res.activeTemplateCount;
   }
 
   // ==========================================

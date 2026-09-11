@@ -12,10 +12,12 @@ import {
   Gauge,
   Play,
   RotateCcw,
+  Zap,
 } from 'lucide-react';
 import { QueueRecord, TestingLine, User } from '../types';
 import { EmbeddedTimeline } from './EmbeddedTimeline';
 import { formatDateTime } from '../utils/formatters';
+import { calculateOverallCapacity } from '../utils/capacityCalculator';
 
 interface LiveDashboardProps {
   queueRecords: QueueRecord[];
@@ -40,6 +42,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const overallCapacityStats = useMemo(
+    () => calculateOverallCapacity(queueRecords, testingLines),
+    [queueRecords, testingLines]
+  );
 
   const engineLines = useMemo(
     () => testingLines.filter((l) => l.componentGroup === 'Engine'),
@@ -113,6 +120,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       opStatus = 'WAITING';
     }
 
+    // Line capacity summary for this station
+    const lineSummary = overallCapacityStats.lineSummaries.find((s) => s.lineId === line.id);
+    const utilPercent = lineSummary ? lineSummary.utilizationPercent : 0;
+    const isOverloaded = utilPercent > 100;
+    const isHigh = utilPercent >= 85 && !isOverloaded;
+
     return (
       <div
         key={line.id}
@@ -132,7 +145,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       >
         <div>
           {/* Card Top Header: Station Name & Operational Status */}
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200/50 mb-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200/50 mb-2.5">
             <div className="flex items-center space-x-2">
               <span
                 className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
@@ -161,6 +174,52 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             >
               {opStatus}
             </span>
+          </div>
+
+          {/* Line Capacity Status Bar with Red/Green/Amber Indicator */}
+          <div
+            className={`p-2 rounded-xl mb-3 border ${
+              isTvMode
+                ? 'bg-slate-800/80 border-slate-700'
+                : 'bg-slate-50/90 border-slate-200/70'
+            }`}
+          >
+            <div className="flex items-center justify-between text-[11px] font-bold mb-1">
+              <span className={`flex items-center space-x-1 ${isTvMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                <Gauge className="w-3 h-3 text-blue-500" />
+                <span>Line Capacity:</span>
+              </span>
+              <span
+                className={`font-mono font-black ${
+                  isOverloaded
+                    ? 'text-rose-500'
+                    : isHigh
+                    ? 'text-amber-500'
+                    : 'text-emerald-600'
+                }`}
+              >
+                {utilPercent.toFixed(0)}%
+              </span>
+            </div>
+
+            {/* Red / Green Progress Bar */}
+            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  isOverloaded
+                    ? 'bg-rose-500'
+                    : isHigh
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+                style={{ width: `${Math.min(100, Math.max(4, utilPercent))}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-[10px] mt-1 text-slate-400 font-mono">
+              <span>Planned: <strong>{lineSummary ? lineSummary.plannedHours.toFixed(1) : 0}h</strong></span>
+              <span>Available: <strong>{lineSummary ? lineSummary.availableHours.toFixed(1) : 0}h</strong></span>
+            </div>
           </div>
 
           {/* Current Running JO Section */}

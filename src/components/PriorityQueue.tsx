@@ -21,20 +21,19 @@ import {
   History,
   Gauge,
   Calendar,
+  Play,
 } from 'lucide-react';
 import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine, TestOverride } from '../types';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { calculateOverallCapacity, calculateScheduleForQueue } from '../utils/capacityCalculator';
-import { CapacityKPICards } from './CapacityKPICards';
-import { TestingLinesCapacitySection } from './TestingLinesCapacitySection';
 import { LineSetupModal } from './LineSetupModal';
 
 interface PriorityQueueProps {
   currentUserRole: UserRole | string;
   currentUserName: string;
   onOpenJODetail: (joNumber: string) => void;
-  onStartTest?: (joNumber: string, compGroup: CompGroup) => void;
+  onStartTest?: (joNumber: string, compGroup: CompGroup, testType?: 'PROD' | 'RETEST', gltStatus?: string) => void;
 }
 
 export const PriorityQueue: React.FC<PriorityQueueProps> = ({
@@ -394,46 +393,6 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
   return (
     <div className="space-y-5 pb-24 max-w-6xl mx-auto px-2 sm:px-4 pt-3">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2 text-blue-400 text-xs font-bold uppercase tracking-wider mb-1">
-            <ListOrdered className="w-4 h-4 text-blue-400" />
-            <span>Production Planning & Control</span>
-          </div>
-          <h2 className="text-xl font-black text-white tracking-tight">
-            PRIORITY & CAPACITY
-          </h2>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Testing Queue Planning & Capacity Management for Engine, Power Train (PT-PPM), and Cylinder.
-            {canReorder
-              ? ' You have authority to adjust priorities, allocate lines, and schedule urgent jobs.'
-              : ' Read-only view for testing station operators.'}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={handleSyncPPC}
-            disabled={isLoading}
-            className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Sync PPC Source</span>
-          </button>
-
-          {canReorder && (
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Manual JO</span>
-            </button>
-          )}
-        </div>
-      </div>
-
       {syncFeedback && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center space-x-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -441,152 +400,90 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
         </div>
       )}
 
-      {/* TOP KPI CARDS */}
-      <CapacityKPICards stats={overallCapacityStats} />
+      {/* PPC PRIORITY TESTING QUEUE CARD */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-4">
+        {/* Card Header with Add Manual JO Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+              <ListOrdered className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-slate-900 tracking-tight uppercase">
+                PPC Priority Testing Queue
+              </h2>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Active sequencing & test execution queue for Engine, Power Train (PT-PPM), and Cylinder
+              </p>
+            </div>
+          </div>
 
-      {/* TESTING LINES CAPACITY SECTION */}
-      <TestingLinesCapacitySection
-        summaries={overallCapacityStats.lineSummaries}
-        onOpenSetup={() => setShowLineSetupModal(true)}
-        canConfigure={canReorder}
-      />
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleSyncPPC}
+              disabled={isLoading}
+              className="flex items-center space-x-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>Sync</span>
+            </button>
 
-      {/* Component Group Tabs */}
-      <div className="flex items-center justify-between flex-wrap gap-3 bg-white border border-slate-200 rounded-2xl p-2 shadow-xs">
-        <div className="flex space-x-1">
-          {(['Engine', 'PT-PPM', 'Cylinder'] as CompGroup[]).map((group) => {
-            const count = queueList.filter((q) => q.compGroup === group && q.status !== 'FINISH').length;
-            const isSelected = selectedCompGroup === group;
-            return (
+            {canReorder && (
               <button
-                key={group}
-                onClick={() => setSelectedCompGroup(group)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 ${
-                  isSelected
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
               >
-                <span>{group}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
-                    isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  {count}
-                </span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Manual JO</span>
               </button>
-            );
-          })}
+            )}
+          </div>
         </div>
 
-        {/* Search Filter */}
-        <div className="relative min-w-[220px]">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Filter queue (JO, Unit, Model)..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium"
-          />
+        {/* Component Group Tabs & Search */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex space-x-1">
+            {(['Engine', 'PT-PPM', 'Cylinder'] as CompGroup[]).map((group) => {
+              const count = queueList.filter((q) => q.compGroup === group && q.status !== 'FINISH').length;
+              const isSelected = selectedCompGroup === group;
+              return (
+                <button
+                  key={group}
+                  onClick={() => setSelectedCompGroup(group)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{group}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search Filter */}
+          <div className="relative min-w-[220px]">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Filter queue (JO, Unit, Model)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium"
+            />
+          </div>
         </div>
       </div>
 
-      {/* 1. URGENT - UNASSIGNED JO SECTION */}
-      {urgentUnassigned.length > 0 && (
-        <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-rose-200/80 pb-2">
-            <div className="flex items-center space-x-2">
-              <span className="flex h-2.5 w-2.5 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600"></span>
-              </span>
-              <h3 className="text-xs font-black text-rose-900 uppercase tracking-wider">
-                URGENT — UNASSIGNED JO ({urgentUnassigned.length})
-              </h3>
-            </div>
-            <span className="text-[11px] text-rose-700 font-medium">
-              Requires PPC / Supervisor Priority Allocation
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {urgentUnassigned.map((item) => (
-              <div
-                key={item.queueRecordId}
-                className="bg-white border border-rose-300 rounded-xl p-3.5 shadow-xs flex flex-col justify-between"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center space-x-2 mb-1">
-                      <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md uppercase">
-                        URGENT
-                      </span>
-                      <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                        {item.testType}
-                      </span>
-                      <span className="text-xs font-mono font-bold text-blue-900">
-                        {item.joRoNumber}
-                      </span>
-                    </div>
-                    <div className="text-xs font-black text-slate-900">
-                      {item.unitModel} — {item.component}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => onOpenJODetail(item.joRoNumber)}
-                    className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-blue-600 rounded-lg transition-all"
-                    title="View JO Details"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {item.aiRecommendation && (
-                  <div className="mt-2.5 bg-blue-50/80 border border-blue-200 rounded-lg p-2 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center space-x-1.5 text-blue-900">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span>
-                        AI Suggestion: <strong>Priority {item.aiRecommendation.suggestedPriority}</strong> ({item.aiRecommendation.reason})
-                      </span>
-                    </div>
-                    {canReorder && (
-                      <button
-                        onClick={() => handleApplyAI(item)}
-                        className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-md transition-all shrink-0"
-                      >
-                        Apply
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500 italic">
-                    Not yet sequenced into testing queue
-                  </span>
-                  {canReorder ? (
-                    <button
-                      onClick={() => handleOpenAssignUrgent(item)}
-                      className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-xs"
-                    >
-                      Assign Priority
-                    </button>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-semibold">
-                      Waiting for PPC
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 2. RANKED PRIORITY QUEUE CARDS */}
+      {/* RANKED PRIORITY QUEUE CARDS */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -808,11 +705,27 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                     {/* Open JO Detail Button */}
                     <button
                       onClick={() => onOpenJODetail(item.joRoNumber)}
-                      className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl transition-all border border-slate-200 flex items-center space-x-1"
+                      className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl transition-all border border-slate-200 flex items-center space-x-1 cursor-pointer"
                     >
-                      <span>Open</span>
+                      <span>Detail</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </button>
+
+                    {/* Direct Test Execution Action */}
+                    {onStartTest && !isFinish && (
+                      <button
+                        onClick={() => onStartTest(item.joRoNumber, item.compGroup, item.testType, item.gltStatus)}
+                        className={`text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer ${
+                          isOnProcess
+                            ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
+                        title={isOnProcess ? 'Resume Active Testing Session' : 'Start Testing Now'}
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>{isOnProcess ? 'Resume' : 'Start Test'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );

@@ -44,7 +44,7 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 1.1 Universal GLT Engine
   templates.push(
     createTemplate(
-      'tmpl-glt-engine-v2',
+      'GLT_ENGINE_UNIVERSAL',
       'GLT Engine Universal',
       'Engine',
       'GLT',
@@ -69,7 +69,7 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 1.2 Universal GLT PT-PPM
   templates.push(
     createTemplate(
-      'tmpl-glt-pt-ppm-v2',
+      'GLT_PT_PPM_UNIVERSAL',
       'GLT PT-PPM Universal',
       'PT-PPM',
       'GLT',

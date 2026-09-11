@@ -243,6 +243,13 @@ export const apiClient = {
     return store.validateProductMaster();
   },
 
+  ensureProductionTemplates: async (): Promise<{
+    activeTemplateCount: number;
+    purgedStarterCount: number;
+  }> => {
+    return store.ensureProductionTemplates();
+  },
+
   ensureStarterChecksheetsForAllActiveProducts: async (): Promise<{
     createdCount: number;
     alreadyExistingCount: number;

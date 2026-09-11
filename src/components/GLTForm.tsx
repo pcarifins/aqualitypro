@@ -16,7 +16,7 @@ import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
-import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
+import { findMatchingProduct, getCompatibleTemplates, resolveGLTTemplate } from '../utils/checksheetResolver';
 import {
   Save,
   CheckCircle2,
@@ -106,9 +106,10 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   // Load Queue & Assemblers
   useEffect(() => {
     apiClient.getQueueRecords().then((qList) => {
-      // Filter: PROD only, priority assigned, GLT not completed, active, and matching operator role/allowedCompGroups
+      // Filter: PROD only, priority assigned, GLT not completed, active, NOT Cylinder, and matching operator role/allowedCompGroups
       const gltEligible = qList.filter(
         (q) =>
+          q.compGroup !== 'Cylinder' &&
           q.testType === 'PROD' &&
           !q.isUrgentUnassigned &&
           q.gltStatus !== 'GOOD' &&
@@ -132,10 +133,36 @@ export const GLTForm: React.FC<GLTFormProps> = ({
 
   // Load checksheet items based on category / compGroup / component / unitModel
   useEffect(() => {
-    if (!component || !unitModel) {
-      getChecksheets(productCategory).then((items) => {
-        setChecksheetItems(items);
+    if (!compGroup) {
+      if (productCategory) {
+        getChecksheets(productCategory).then((items) => {
+          setChecksheetItems(items);
+        });
+      }
+      return;
+    }
+
+    if (compGroup === 'Cylinder') {
+      setChecksheetItems([]);
+      setValidationError('Cylinder components do not require GLT inspection. Please proceed directly to Testbench.');
+      return;
+    }
+
+    // Direct Universal GLT resolution
+    const gltRes = resolveGLTTemplate(checksheetTemplates, compGroup);
+    if (gltRes.status === 'ACTIVE' && gltRes.template) {
+      const items: ChecksheetItem[] = [];
+      gltRes.template.sections.forEach((sec) => {
+        sec.items.forEach((item) => {
+          items.push({
+            ...item,
+            section: sec.name,
+            templateId: gltRes.template!.id,
+            process: 'GLT',
+          });
+        });
       });
+      setChecksheetItems(items);
       return;
     }
 
@@ -164,7 +191,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     } else {
       setChecksheetItems([]);
     }
-  }, [component, unitModel, productCategory, productModels, checksheetTemplates]);
+  }, [compGroup, component, unitModel, productCategory, productModels, checksheetTemplates]);
 
   const handleSelectQueueItem = (qId: string) => {
     setSelectedQueueId(qId);
@@ -230,35 +257,22 @@ export const GLTForm: React.FC<GLTFormProps> = ({
             joNumber.trim().toUpperCase()
         )?.queueRecordId;
 
-      if (!targetQ) {
-        setValidationError(
-          'Queue record not found. Cannot start GLT lead-time.'
-        );
-        return;
-      }
-
       const nowIso = new Date().toISOString();
 
-      // FIRESTORE FIRST
-      await store.updateQueueRecord(targetQ, {
-        gltReceivingTime: nowIso,
-        status: 'ON_PROCESS',
-        priorityLocked: true,
-      });
+      if (targetQ) {
+        // FIRESTORE FIRST
+        await store.updateQueueRecord(targetQ, {
+          gltReceivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        });
+      }
 
-      // Local UI only after Firestore succeeds
+      // Set local receiving time
       setReceivingTime(nowIso);
-
       setValidationError(null);
-
-      setToastMessage(
-        'Received at GLT! GLT lead-time timer started.'
-      );
-
-      setTimeout(
-        () => setToastMessage(null),
-        3000
-      );
+      setToastMessage('Received at GLT! GLT lead-time timer started.');
+      setTimeout(() => setToastMessage(null), 3000);
     } catch (error: any) {
       console.error(
         'Failed to receive at GLT:',
