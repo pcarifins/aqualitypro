@@ -250,21 +250,34 @@ export interface FinalTestTemplateRelationship {
   id?: string;
   relationshipId: string;
   productId: string;
+  compGroup?: CompGroup | string;
+  component?: string;
   componentName: string;
   unitModel: string;
   productGroup: string;
   subGroup?: string | null;
+  testingProcess?: 'DYNOTEST' | 'TESTBENCH' | 'Dynotest' | 'Testbench';
   finalProcess: 'DYNOTEST' | 'TESTBENCH' | 'Dynotest' | 'Testbench';
   templateId: string;
   templateName?: string;
   standardProfileId: string;
   compatibleLineIds: string[];
+  relationshipMode?: 'STANDARD' | 'PERFORMANCE_ONLY';
+  mode?: 'STANDARD' | 'PERFORMANCE_ONLY';
+  isPerformanceOnly?: boolean;
+  process?: string;
+  configurationStatus?: 'APPROVED' | 'TEMPORARY_APPROVED' | 'DRAFT' | 'UNCONFIGURED';
+  active?: boolean;
   status: 'ACTIVE' | 'INACTIVE' | 'REVIEW_REQUIRED';
+  revision?: number;
   version: number;
   effectiveDate?: string;
   approvedBy?: string;
   approvedDate?: string;
+  approvedAt?: string;
+  createdBy?: string;
   createdAt: string;
+  updatedBy?: string;
   updatedAt: string;
 }
 
@@ -314,6 +327,7 @@ export interface QueueRecord {
   gltStatus?: 'GOOD' | 'NOT_GOOD' | 'PENDING';
   gltReceivingTime?: string;
   receivingTime?: string; // Standard receiving ISO timestamp for active testing process
+  actualLineOffDateTime?: string; // Manual Actual Line Off Date and Time
   priorityLocked: boolean; // true when test starts (ON_PROCESS)
   testingLineId?: string; // Configured Testing Line assignment
   currentTestingLineId?: string; // Canonical testing line assignment
@@ -435,6 +449,7 @@ export interface GLTRecord {
   operatorName: string;
   testerName?: string; // Alias for operatorName
   incomingTime: string; // ISO String
+  actualLineOffDateTime?: string; // Manual Actual Line Off Date and Time
   submissionTime?: string; // ISO String
   gltCompleteTime?: string; // Alias
   benchReceiveTime?: string; // Alias

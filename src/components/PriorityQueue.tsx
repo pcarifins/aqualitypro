@@ -498,6 +498,161 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
           <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
             No active test jobs in {selectedCompGroup} queue.
           </div>
+        ) : selectedCompGroup === 'Engine' ? (
+          /* Requirement 5: Engine Active Test Queue simplified into a compact table */
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold text-[11px] uppercase tracking-wider">
+                    <th className="py-3 px-4">JO</th>
+                    <th className="py-3 px-4">Unit Model</th>
+                    <th className="py-3 px-4">Comp Name</th>
+                    <th className="py-3 px-4">Test Type</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {scheduledRankedQueue.map((item) => {
+                    const isOnProcess = item.status === 'ON_PROCESS';
+                    const isFinish = item.status === 'FINISH';
+
+                    return (
+                      <tr
+                        key={item.queueRecordId}
+                        className={`hover:bg-slate-50/80 transition-colors ${
+                          isOnProcess
+                            ? 'bg-amber-50/30'
+                            : isFinish
+                            ? 'bg-emerald-50/20 opacity-80'
+                            : ''
+                        }`}
+                      >
+                        {/* JO */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-lg text-xs">
+                              {item.joRoNumber}
+                            </span>
+                            {item.priorityLocked && (
+                              <span title="Priority Locked">
+                                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Unit Model */}
+                        <td className="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">
+                          {item.unitModel || '-'}
+                        </td>
+
+                        {/* Comp Name */}
+                        <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
+                          {item.component || '-'}
+                        </td>
+
+                        {/* Test Type */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-black px-2 py-0.5 rounded-md inline-block ${
+                              item.testType === 'RETEST'
+                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            }`}
+                          >
+                            {item.testType || 'PROD'}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {isOnProcess ? (
+                            <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-md inline-flex items-center space-x-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                              <span>ON PROCESS</span>
+                            </span>
+                          ) : isFinish ? (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              FINISH
+                            </span>
+                          ) : item.gltStatus === 'GOOD' ? (
+                            <span className="bg-indigo-100 text-indigo-800 border border-indigo-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              GLT READY
+                            </span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              WAITING
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Action */}
+                        <td className="py-3 px-4 whitespace-nowrap text-right">
+                          <div className="flex items-center justify-end space-x-1.5">
+                            {canReorder && !item.priorityLocked && !isOnProcess && !isFinish && (
+                              <div className="flex items-center space-x-0.5 mr-1">
+                                <button
+                                  onClick={() => handleMoveUp(item)}
+                                  disabled={item.currentPriority <= 1}
+                                  className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 disabled:opacity-30 rounded transition-all cursor-pointer"
+                                  title="Move Priority Up"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleMoveDown(item)}
+                                  className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded transition-all cursor-pointer"
+                                  title="Move Priority Down"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+
+                            <button
+                              onClick={() => {
+                                setSelectedQueueItem(item);
+                                setShowHistoryModal(true);
+                              }}
+                              className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-md transition-all cursor-pointer"
+                              title="Audit History"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={() => onOpenJODetail(item.joRoNumber)}
+                              className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all border border-slate-200 cursor-pointer"
+                              title="View JO Details"
+                            >
+                              Detail
+                            </button>
+
+                            {onStartTest && !isFinish && (
+                              <button
+                                onClick={() => onStartTest(item.joRoNumber, item.compGroup, item.testType, item.gltStatus)}
+                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all flex items-center space-x-1 shadow-2xs cursor-pointer ${
+                                  isOnProcess
+                                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                }`}
+                                title={isOnProcess ? 'Resume Session' : 'Start Test'}
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                                <span>{isOnProcess ? 'Resume' : 'Start'}</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <div className="space-y-2.5">
             {scheduledRankedQueue.map((item, idx) => {

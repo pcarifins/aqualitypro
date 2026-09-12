@@ -150,10 +150,16 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-slate-300">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-300">
                     <div>
                       <span className="text-slate-500 block text-[10px]">Incoming Time:</span>
                       <span className="font-mono">{formatDateTime(glt.incomingTime)}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Actual Line Off:</span>
+                      <span className="font-mono text-emerald-400 font-bold">
+                        {glt.actualLineOffDateTime ? formatDateTime(glt.actualLineOffDateTime) : '-'}
+                      </span>
                     </div>
                     <div>
                       <span className="text-slate-500 block text-[10px]">GLT Completed:</span>

@@ -20,6 +20,7 @@ import {
   QualityCertificateRecord,
   ProductMasterValidationReport,
   TestOverride,
+  FinalTestTemplateRelationship,
 } from '../types';
 
 import { store } from '../data/storageEngine';
@@ -239,6 +240,18 @@ export const apiClient = {
   },
 
   // --- PRODUCT MASTER VALIDATION & STARTER TEMPLATES ---
+  getProductChecksheetRelationships: async (): Promise<FinalTestTemplateRelationship[]> => {
+    return store.getProductChecksheetRelationships();
+  },
+
+  saveProductChecksheetRelationship: async (rel: FinalTestTemplateRelationship, actorName?: string): Promise<void> => {
+    return store.saveProductChecksheetRelationship(rel, actorName);
+  },
+
+  deleteProductChecksheetRelationship: async (id: string, actorName?: string): Promise<void> => {
+    return store.deleteProductChecksheetRelationship(id, actorName);
+  },
+
   validateProductMaster: async (): Promise<ProductMasterValidationReport> => {
     return store.validateProductMaster();
   },

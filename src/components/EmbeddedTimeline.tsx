@@ -214,14 +214,13 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
             ))}
           </div>
 
-          {/* Job Bars - ONLY show comp name as requested */}
+          {/* Job Bars - Display JO Number (joRoNumber) */}
           {lineJobs.length === 0 ? (
             <span className="text-[10px] text-slate-400 italic px-3 z-10">No jobs scheduled</span>
           ) : (
             lineJobs.map((record) => {
               const pos = getBarPosition(record, line);
               const statusStyle = getStatusStyle(record, line.standardDurationMinutes);
-              const compName = getCleanCompName(record);
 
               return (
                 <div
@@ -235,7 +234,7 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
                   style={{ left: pos.left, width: pos.width }}
                   className={`absolute h-7 rounded-md px-2 flex items-center justify-center text-[10px] font-bold border shadow-2xs cursor-pointer transition-transform hover:scale-[1.03] z-10 ${statusStyle}`}
                 >
-                  <span className="truncate font-black tracking-tight">{compName}</span>
+                  <span className="truncate font-mono font-black tracking-tight">{record.joRoNumber}</span>
                 </div>
               );
             })
@@ -311,7 +310,6 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
                 ) : (
                   dayJobs.map((record) => {
                     const statusStyle = getStatusStyle(record, line.standardDurationMinutes);
-                    const compName = getCleanCompName(record);
 
                     return (
                       <div
@@ -322,9 +320,9 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
                           setSelectedJobBar(record);
                           if (onSelectJO) onSelectJO(record.joRoNumber);
                         }}
-                        className={`py-1 px-1.5 rounded-md text-[10px] font-bold text-center truncate border shadow-2xs cursor-pointer transition-transform hover:scale-[1.02] ${statusStyle}`}
+                        className={`py-1 px-1.5 rounded-md text-[10px] font-mono font-black text-center truncate border shadow-2xs cursor-pointer transition-transform hover:scale-[1.02] ${statusStyle}`}
                       >
-                        {compName}
+                        {record.joRoNumber}
                       </div>
                     );
                   })

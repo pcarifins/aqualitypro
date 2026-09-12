@@ -5,21 +5,18 @@ import * as path from 'path';
 export function generateUatWorkbook(): Buffer {
   const wb = xlsx.utils.book_new();
 
-  // 1. Priority Testing Sheet
+  // 1. Priority Testing Sheet (PPC Schedule) - Exactly 5 columns
   const priorityData = [
-    [
-      "JO / RO Number", "Component Group", "Sub Group", "Unit Model", "Component", 
-      "Test Type", "Planned Priority", "Assembly Mechanic", "Urgent"
-    ],
-    ["UAT26082801", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 1, "Ardian Hidayat", false],
-    ["UAT26082802", "Engine", "PT", "PC2000-8R", "ENGINE ASSY", "RETEST", 2, "Ahmad Fauzi", false],
-    ["UAT26082803", "PT-PPM", "PT", "HD785-7", "TORQFLOW ASSY", "PROD", 3, "Budi Santoso", false],
-    ["UAT26082804", "PT-PPM", "PPM", "PC1250SP-8R", "MAIN PUMP NO 1", "PROD", 999, "Kurniawan", true],
-    ["UAT26082805", "PT-PPM", "PT", "D375A-6R", "FINAL DRIVE LEFT", "PROD", 4, "Suroso", false],
-    ["UAT26082806", "PT-PPM", "PPM", "PC1250SP-8R", "SWING MOTOR", "PROD", 5, "Joko Widodo", false],
-    ["UAT26082807", "Cylinder", "PT", "HD785-7", "HOIST CYLINDER", "PROD", 6, "Eko Prasetyo", false],
-    ["UAT26082808", "Cylinder", "PT", "PC1250SP-8R", "ARM CYLINDER", "RETEST", 7, "Agus Setiawan", false],
-    ["UAT26082809", "Engine", "PT", "HD785-7", "ENGINE ASSY", "PROD", 8, "Rahmat Hidayat", false]
+    ["JO", "Comp Group", "Unit Model", "Comp Name", "Test Type"],
+    ["UAT26082801", "Engine", "HD785-7", "ENGINE ASSY", "PROD"],
+    ["UAT26082802", "Engine", "PC2000-8R", "ENGINE ASSY", "RETEST"],
+    ["UAT26082803", "PT-PPM", "HD785-7", "TORQFLOW ASSY", "PROD"],
+    ["UAT26082804", "PT-PPM", "PC1250SP-8R", "MAIN PUMP NO 1", "PROD"],
+    ["UAT26082805", "PT-PPM", "D375A-6R", "FINAL DRIVE LEFT", "PROD"],
+    ["UAT26082806", "PT-PPM", "PC1250SP-8R", "SWING MOTOR", "PROD"],
+    ["UAT26082807", "Cylinder", "HD785-7", "HOIST CYLINDER", "PROD"],
+    ["UAT26082808", "Cylinder", "PC1250SP-8R", "ARM CYLINDER", "RETEST"],
+    ["UAT26082809", "Engine", "HD785-7", "ENGINE ASSY", "PROD"]
   ];
   const wsPriority = xlsx.utils.aoa_to_sheet(priorityData);
   xlsx.utils.book_append_sheet(wb, wsPriority, "Priority Testing");

@@ -73,6 +73,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /productChecksheetRelationships/{relationshipId} {
+      allow read, write: if true;
+    }
+
     match /standardProfiles/{profileId} {
       allow read, write: if true;
     }

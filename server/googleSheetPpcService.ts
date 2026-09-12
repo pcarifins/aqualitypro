@@ -121,22 +121,24 @@ export async function processWorkbookBuffer(buffer: Buffer, sourceName: string, 
     });
   };
 
-  const idxJo = findColIndex(['joNumber', 'jonumber', 'jo / ro number', 'jo/ro number', 'job order', 'no jo', 'no. jo', 'no.jo', 'jo', 'ro number', 'ro']);
-  const idxModel = findColIndex(['unitModel', 'unitmodel', 'unit model', 'model unit', 'unit', 'model']);
-  const idxComp = findColIndex(['component', 'componentname', 'component name', 'nama komponen', 'comp', 'part name']);
+  const idxJo = findColIndex(['jo', 'jo number', 'jonumber', 'jo / ro number', 'jo/ro number', 'job order', 'no jo', 'no. jo', 'no.jo', 'ro number', 'ro']);
+  const idxCompGroup = findColIndex(['comp group', 'compgroup', 'component group', 'group', 'category']);
+  const idxModel = findColIndex(['unit model', 'unitmodel', 'model unit', 'unit', 'model']);
+  const idxComp = findColIndex(['comp name', 'compname', 'component', 'component name', 'nama komponen', 'comp', 'part name']);
+  const idxTestType = findColIndex(['test type', 'testtype', 'testing type', 'type']);
+
+  // Legacy/optional columns (preserved if present in historical data, but not mandatory)
   const idxPriority = findColIndex(['plannedPriority', 'planned priority', 'priority', 'ppc priority']);
   const idxCustomer = findColIndex(['customer', 'nama pelanggan', 'pelanggan', 'cust', 'client']);
   const idxMechanic = findColIndex(['assemblyMechanic', 'assembly mechanic', 'mechanic', 'assembler']);
   const idxPartNo = findColIndex(['partNumber', 'part number', 'part no', 'part number/part no']);
   const idxSerialNo = findColIndex(['serialNumber', 'serial number', 'serial no', 's/n']);
   const idxUrgent = findColIndex(['isUrgent', 'urgent', 'is urgent']);
-  const idxCompGroup = findColIndex(['compGroup', 'component group', 'comp group', 'group', 'category']);
   const idxSubGroup = findColIndex(['subGroup', 'sub group', 'subgroup']);
-  const idxTestType = findColIndex(['testType', 'test type', 'testing type']);
   const idxRemark = findColIndex(['remark', 'remarks', 'notes']);
 
   if (idxJo === -1 || idxModel === -1 || idxComp === -1) {
-    throw new Error(`Required columns (JO Number, Unit Model, Component) not found in worksheet '${prioritySheetName}'. Headers found: ${rawHeaders.join(', ')}`);
+    throw new Error(`Required columns (JO, Unit Model, Comp Name) not found in worksheet '${prioritySheetName}'. Headers found: ${rawHeaders.join(', ')}`);
   }
 
   const backupId = await createBackupSnapshot(sourceName, currentUser || 'System', sourceHash);
@@ -210,17 +212,19 @@ export async function processWorkbookBuffer(buffer: Buffer, sourceName: string, 
 
     validRowsCount++;
 
-    const rawPriority = idxPriority >= 0 ? row[idxPriority] : 1;
-    const parsedPriority = parseInt(rawPriority, 10);
-    const plannedPriority = isNaN(parsedPriority) ? 1 : Math.max(0, parsedPriority);
+    // Requirement 1: Use the PPC spreadsheet row order as the queue priority order
+    const plannedPriority = idxPriority >= 0 && !isNaN(parseInt(row[idxPriority], 10))
+      ? parseInt(row[idxPriority], 10)
+      : validRowsCount;
 
     const rawUrgent = idxUrgent >= 0 ? String(row[idxUrgent]).trim().toLowerCase() : '';
     const isUrgent = rawUrgent === 'true' || rawUrgent === 'yes' || rawUrgent === '1' || rawUrgent === 'urgent';
 
-    const customer = idxCustomer >= 0 ? String(row[idxCustomer] || '').trim() : 'Internal Stock';
-    const assemblyMechanic = idxMechanic >= 0 ? String(row[idxMechanic] || '').trim() : 'Unassigned';
-    const partNumber = idxPartNo >= 0 ? String(row[idxPartNo] || '').trim() : '';
-    const serialNumber = idxSerialNo >= 0 ? String(row[idxSerialNo] || '').trim() : '';
+    // Preserve historical data in existing records or fallback to clean defaults
+    const customer = idxCustomer >= 0 && row[idxCustomer] ? String(row[idxCustomer]).trim() : '';
+    const assemblyMechanic = idxMechanic >= 0 && row[idxMechanic] ? String(row[idxMechanic]).trim() : '';
+    const partNumber = idxPartNo >= 0 && row[idxPartNo] ? String(row[idxPartNo]).trim() : '';
+    const serialNumber = idxSerialNo >= 0 && row[idxSerialNo] ? String(row[idxSerialNo]).trim() : '';
     const rowRemark = idxRemark >= 0 ? String(row[idxRemark] || '').trim() : '';
     const rawTestType = idxTestType >= 0 ? String(row[idxTestType] || '').trim().toUpperCase() : 'PROD';
     const testType = rawTestType === 'RETEST' ? 'RETEST' : 'PROD';

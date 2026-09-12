@@ -30,6 +30,11 @@ const COLLECTIONS = [
   'pdfReports',
   'certificates',
   'testOverrides',
+  'auditLogs',
+  'templateRelationships',
+  'finalTestTemplateRelationships',
+  'productChecksheetRelationships',
+  'standardProfiles',
 ];
 
 async function runBackup() {

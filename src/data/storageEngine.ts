@@ -35,6 +35,8 @@ import {
   initialGLTRecords,
   initialDynotestRecords,
   initialHydraulicRecords,
+  initialTemplateRelationships,
+  initialStandardProfiles,
 } from './initialData';
 
 import { INITIAL_REQUIRED_PRODUCT_MODELS } from './productMasterSeed';
@@ -282,11 +284,20 @@ class DataStore {
             this.notifyListeners();
           }
         }),
-        subscribeAndResolve<TemplateRelationship>('templateRelationships', (data) => {
-          if (data) {
+        subscribeAndResolve<TemplateRelationship>('productChecksheetRelationships', (data) => {
+          if (data && data.length > 0) {
             this.templateRelationships = data;
             this.saveToStorageCache();
             this.notifyListeners();
+          } else {
+            // Fallback to legacy collection if productChecksheetRelationships is not yet populated
+            subscribeAndResolve<TemplateRelationship>('templateRelationships', (legacyData) => {
+              if (legacyData && legacyData.length > 0) {
+                this.templateRelationships = legacyData;
+                this.saveToStorageCache();
+                this.notifyListeners();
+              }
+            });
           }
         }),
         subscribeAndResolve<StandardProfile>('standardProfiles', (data) => {
@@ -383,10 +394,16 @@ class DataStore {
       this.testOverrides = ovr ? JSON.parse(ovr) : [];
 
       const rel = getStorage(STORAGE_KEYS.RELATIONSHIPS);
-      this.templateRelationships = rel ? JSON.parse(rel) : [];
+      this.templateRelationships = rel ? JSON.parse(rel) : [...initialTemplateRelationships];
+      if (this.templateRelationships.length === 0) {
+        this.templateRelationships = [...initialTemplateRelationships];
+      }
 
       const prof = getStorage(STORAGE_KEYS.STANDARD_PROFILES);
-      this.standardProfiles = prof ? JSON.parse(prof) : [];
+      this.standardProfiles = prof ? JSON.parse(prof) : [...initialStandardProfiles];
+      if (this.standardProfiles.length === 0) {
+        this.standardProfiles = [...initialStandardProfiles];
+      }
 
       // Guarantee production checksheet architecture (2 GLT + 15 Shared Final + 1 Contingency)
       this.ensureProductionTemplates();
@@ -428,8 +445,8 @@ class DataStore {
     this.testingLines = [...initialTestingLines];
     this.pdfReports = [];
     this.certificates = [];
-    this.templateRelationships = [];
-    this.standardProfiles = [];
+    this.templateRelationships = [...initialTemplateRelationships];
+    this.standardProfiles = [...initialStandardProfiles];
     this.saveToStorageCache();
     this.notifyListeners();
   }
@@ -1923,13 +1940,18 @@ class DataStore {
     }
   }
 
-  // --- TEMPLATE RELATIONSHIPS ---
+  // --- TEMPLATE RELATIONSHIPS & PRODUCT CHECKSHEET RELATIONSHIPS ---
   public getTemplateRelationships(): TemplateRelationship[] {
+    return this.templateRelationships || [];
+  }
+
+  public getProductChecksheetRelationships(): TemplateRelationship[] {
     return this.templateRelationships || [];
   }
 
   public async saveTemplateRelationship(rel: TemplateRelationship, actorName = 'Admin'): Promise<void> {
     const isNew = !this.templateRelationships.some((r) => r.relationshipId === rel.relationshipId);
+    await saveDocument('productChecksheetRelationships', rel);
     await saveDocument('templateRelationships', rel);
     await saveDocument('finalTestTemplateRelationships', rel);
     const idx = this.templateRelationships.findIndex((r) => r.relationshipId === rel.relationshipId);
@@ -1942,7 +1964,7 @@ class DataStore {
 
     await logAuditEvent({
       action: isNew ? 'RELATIONSHIP_CREATED' : 'RELATIONSHIP_UPDATED',
-      collectionName: 'templateRelationships',
+      collectionName: 'productChecksheetRelationships',
       documentId: rel.relationshipId,
       userName: actorName,
       details: `${isNew ? 'Created' : 'Updated'} relationship matching template ${rel.templateId} to component ${rel.componentName} on ${rel.unitModel}`,
@@ -1950,7 +1972,12 @@ class DataStore {
     this.notifyListeners();
   }
 
+  public async saveProductChecksheetRelationship(rel: TemplateRelationship, actorName = 'Admin'): Promise<void> {
+    return this.saveTemplateRelationship(rel, actorName);
+  }
+
   public async deleteTemplateRelationship(id: string, actorName = 'Admin'): Promise<void> {
+    await removeDocument('productChecksheetRelationships', id);
     await removeDocument('templateRelationships', id);
     await removeDocument('finalTestTemplateRelationships', id);
     this.templateRelationships = this.templateRelationships.filter((r) => r.relationshipId !== id);
@@ -1958,12 +1985,16 @@ class DataStore {
 
     await logAuditEvent({
       action: 'RELATIONSHIP_DELETED',
-      collectionName: 'templateRelationships',
+      collectionName: 'productChecksheetRelationships',
       documentId: id,
       userName: actorName,
       details: `Deleted template relationship ID: ${id}`,
     });
     this.notifyListeners();
+  }
+
+  public async deleteProductChecksheetRelationship(id: string, actorName = 'Admin'): Promise<void> {
+    return this.deleteTemplateRelationship(id, actorName);
   }
 
   // --- STANDARD PROFILES ---

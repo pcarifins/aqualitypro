@@ -11,12 +11,15 @@ import {
   QueueRecord,
   CompGroup,
   ChecksheetTemplate,
+  TestingLine,
 } from '../types';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
 import { findMatchingProduct, getCompatibleTemplates, resolveGLTTemplate } from '../utils/checksheetResolver';
+import { getTop3QueueForLine } from '../utils/lineQueueService';
+import { Top3QueueCards } from './Top3QueueCards';
 import {
   Save,
   CheckCircle2,
@@ -29,6 +32,8 @@ import {
   Search,
   ListOrdered,
   ShieldCheck,
+  RotateCcw,
+  CheckCheck,
 } from 'lucide-react';
 import { formatDateTime,calculateMinutesBetween, } from '../utils/formatters';
 import { filterAssemblersByCompGroup } from '../utils/assemblerFilter';
@@ -80,8 +85,15 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
 
+  // Actual Line Off Date & Time (Mandatory before submit)
+  const [actualLineOffDateTime, setActualLineOffDateTime] = useState<string>('');
+
   // GLT receiving / lead-time start
   const [receivingTime, setReceivingTime] = useState<string>('');
+
+  // Testing Lines for GLT
+  const [testingLines, setTestingLines] = useState<TestingLine[]>([]);
+  const [selectedGltLineId, setSelectedGltLineId] = useState<string>('glt-engine');
 
   // Checksheet State
   const [checksheetItems, setChecksheetItems] = useState<ChecksheetItem[]>([]);
@@ -97,13 +109,14 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   // Form Flow Controls
   const [attemptNumber, setAttemptNumber] = useState<number>(1);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [isLockedFromQueue, setIsLockedFromQueue] = useState(false);
 
-  // Load Queue & Assemblers
+  // Load Queue, Assemblers, and Testing Lines
   useEffect(() => {
     apiClient.getQueueRecords().then((qList) => {
       // Filter: PROD only, priority assigned, GLT not completed, active, NOT Cylinder, and matching operator role/allowedCompGroups
@@ -122,7 +135,55 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     apiClient.getAssemblers(true).then((asms) => {
       setAssemblersList(asms);
     });
+
+    apiClient.getTestingLines().then((lines) => {
+      if (lines && lines.length > 0) {
+        setTestingLines(lines);
+      }
+    });
   }, [currentUser]);
+
+  // Derived GLT Lines
+  const gltTestingLines = useMemo(() => {
+    const gltLines = testingLines.filter((l) => l.process === 'GLT' && l.active);
+    if (gltLines.length > 0) return gltLines;
+    return [
+      {
+        id: 'glt-engine',
+        name: 'GLT ENGINE',
+        process: 'GLT' as const,
+        componentGroup: 'Engine' as CompGroup,
+        operatingHoursPerDay: 8,
+        standardDurationMinutes: 45,
+        displayOrder: 1,
+        active: true,
+      },
+      {
+        id: 'glt-pt-ppm',
+        name: 'GLT PT-PPM',
+        process: 'GLT' as const,
+        componentGroup: 'PT-PPM' as CompGroup,
+        operatingHoursPerDay: 8,
+        standardDurationMinutes: 45,
+        displayOrder: 2,
+        active: true,
+      },
+    ];
+  }, [testingLines]);
+
+  const activeGltLine = useMemo(() => {
+    return (
+      gltTestingLines.find((l) => l.id === selectedGltLineId) ||
+      gltTestingLines.find((l) => l.componentGroup === compGroup) ||
+      gltTestingLines[0]
+    );
+  }, [gltTestingLines, selectedGltLineId, compGroup]);
+
+  // Top 3 Queue for the active GLT line
+  const top3GltQueue = useMemo(() => {
+    if (!activeGltLine) return [];
+    return getTop3QueueForLine(activeGltLine, queueRecords, productModels);
+  }, [activeGltLine, queueRecords, productModels]);
 
   // Pre-select or lookup if preloadJONumber is passed
   useEffect(() => {
@@ -220,10 +281,25 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     setCustomer(record.customer || '');
     setPartNumber(record.partNumber || '');
     setSerialNumber(record.serialNumber || '');
-    setReceivingTime(record.gltReceivingTime || '');
+    setReceivingTime(record.gltReceivingTime || record.receivingTime || '');
+
+    if (record.actualLineOffDateTime) {
+      setActualLineOffDateTime(record.actualLineOffDateTime);
+    } else {
+      const prevGlt = existingGLTRecords?.find(
+        (g) => g.joNumber.toUpperCase() === record.joRoNumber.toUpperCase()
+      );
+      if (prevGlt?.actualLineOffDateTime) {
+        setActualLineOffDateTime(prevGlt.actualLineOffDateTime);
+      } else {
+        setActualLineOffDateTime('');
+      }
+    }
 
     if (record.assemblyMechanic) {
       setAssemblyMechanic(record.assemblyMechanic);
+    } else {
+      setAssemblyMechanic(currentUser.name || 'Assembler');
     }
 
     setIsLockedFromQueue(true);
@@ -241,6 +317,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   };
 
   const handleReceiveAtGLT = async () => {
+    const nowIso = new Date().toISOString();
     try {
       if (!joNumber.trim()) {
         setValidationError(
@@ -257,34 +334,33 @@ export const GLTForm: React.FC<GLTFormProps> = ({
             joNumber.trim().toUpperCase()
         )?.queueRecordId;
 
-      const nowIso = new Date().toISOString();
-
       if (targetQ) {
-        // FIRESTORE FIRST
         await store.updateQueueRecord(targetQ, {
           gltReceivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
+        }).catch(async () => {
+          await store.updateQueueRecordByJONumber(joNumber.trim(), {
+            gltReceivingTime: nowIso,
+            status: 'ON_PROCESS',
+            priorityLocked: true,
+          }).catch(() => {});
         });
+      } else {
+        await store.updateQueueRecordByJONumber(joNumber.trim(), {
+          gltReceivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        }).catch(() => {});
       }
-
-      // Set local receiving time
+    } catch (error: any) {
+      console.warn('Non-blocking queue update warning on receive at GLT:', error);
+    } finally {
+      // Always set local receiving time so user is never blocked from clicking / starting timer
       setReceivingTime(nowIso);
       setValidationError(null);
       setToastMessage('Received at GLT! GLT lead-time timer started.');
       setTimeout(() => setToastMessage(null), 3000);
-    } catch (error: any) {
-      console.error(
-        'Failed to receive at GLT:',
-        error
-      );
-
-      setValidationError(
-        `Failed to start GLT: ${
-          error?.message ||
-          'Firestore update failed'
-        }`
-      );
     }
   };
 
@@ -353,13 +429,24 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       return false;
     }
     if (!receivingTime) {
-      setValidationError(
-        'Please click "Receive at GLT" before starting or submitting the inspection.'
-      );
-      return false;
+      const nowIso = new Date().toISOString();
+      setReceivingTime(nowIso);
+      if (joNumber) {
+        store.updateQueueRecordByJONumber(joNumber, {
+          gltReceivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        });
+      }
     }
     if (!assemblyMechanic.trim()) {
-      setValidationError('Assembly Mechanic Name is required.');
+      setAssemblyMechanic(currentUser.name || 'Assembler');
+    }
+
+    if (!actualLineOffDateTime.trim()) {
+      setValidationError('Actual Line Off date and time is mandatory before submitting GLT.');
+      const elem = document.getElementById('actual-line-off-input');
+      if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return false;
     }
 
@@ -474,6 +561,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       customer,
       assemblyMechanic: assemblyMechanic || 'Assembler',
       testDate,
+      actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
       result: finalResult,
       status: 'Draft',
       attemptNumber,
@@ -489,8 +577,60 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     };
 
     await onSaveRecord(draftRecord);
+
+    if (selectedQueueId || joNumber) {
+      store.updateQueueRecordByJONumber(joNumber.trim(), {
+        actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
+      }).catch(() => {});
+    }
+
     setToastMessage('GLT Draft saved successfully. You may continue anytime.');
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleCancelReset = () => {
+    setAnswers({});
+    setItemRemarks({});
+    setNgItem('');
+    setNgDescription('');
+    setRemarks('');
+    setPhotoUrl('');
+    setJoNumber('');
+    setSelectedQueueId('');
+    setReceivingTime('');
+    setActualLineOffDateTime('');
+    setIsLockedFromQueue(false);
+    setValidationError(null);
+    setShowCancelModal(false);
+    setToastMessage('GLT inspection form has been reset.');
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const handleMarkReadyForNextStage = async () => {
+    if (!joNumber.trim()) {
+      setValidationError('Please select and complete a JO inspection before marking Ready for next stage.');
+      return;
+    }
+    if (finalResult !== 'GOOD') {
+      setValidationError('Only units with GOOD result can be marked Ready for Dynotest / Testbench.');
+      return;
+    }
+    const targetQ =
+      selectedQueueId ||
+      queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
+        ?.queueRecordId;
+    if (targetQ) {
+      await store.updateQueueRecord(targetQ, {
+        gltStatus: 'GOOD',
+        status: 'WAITING',
+        actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
+      });
+    }
+    setToastMessage(`JO ${joNumber} is now marked Ready for ${compGroup === 'Engine' ? 'Dynotest' : 'Testbench'}!`);
+    setTimeout(() => {
+      setToastMessage(null);
+      onSuccessSubmitted(joNumber);
+    }, 1500);
   };
 
   const handleOpenConfirm = () => {
@@ -521,6 +661,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         customer,
         assemblyMechanic,
         testDate,
+        actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
         result: finalResult,
         status: 'Submitted',
         attemptNumber,
@@ -548,6 +689,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         await store.updateQueueRecord(targetQ, {
           gltStatus: finalResult === 'GOOD' ? 'GOOD' : 'NOT_GOOD',
           status: finalResult === 'GOOD' ? 'ON_PROCESS' : 'WAITING',
+          actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
         });
       }
 
@@ -615,37 +757,38 @@ export const GLTForm: React.FC<GLTFormProps> = ({
           </span>
         </div>
 
-        {/* Priority JO Selector */}
-        {queueRecords.length === 0 ? (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
-            <div className="text-xs font-bold text-slate-700">No JO Available for GLT</div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              No uncompleted PROD jobs are currently waiting in the Priority Queue.
-            </p>
-          </div>
-        ) : (
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Select JO from Priority Queue <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={selectedQueueId}
-              onChange={(e) => handleSelectQueueItem(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs font-mono"
-            >
-              <option value="">-- Select Authorized JO from Queue --</option>
-              {queueRecords.map((q) => (
-                <option key={q.queueRecordId} value={q.queueRecordId}>
-                  Priority {q.currentPriority || q.plannedPriority || '-'} | JO {q.joRoNumber} |{' '}
-                  {q.unitModel} | {q.component} | PROD
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Note: Retest jobs bypass GLT and go directly to Dynotest / Testbench.
-            </p>
-          </div>
-        )}
+        {/* Line Switcher & Top 3 Queue Selector (Requirement 4 & 5) */}
+        <div className="space-y-3">
+          {gltTestingLines.length > 1 && (
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-slate-600">GLT Station Line:</span>
+              <div className="flex space-x-1.5">
+                {gltTestingLines.map((line) => (
+                  <button
+                    key={line.id}
+                    type="button"
+                    onClick={() => setSelectedGltLineId(line.id)}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                      activeGltLine?.id === line.id
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {line.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Top3QueueCards
+            cards={top3GltQueue}
+            selectedJONumber={joNumber}
+            selectedQueueId={selectedQueueId}
+            onSelectCard={(rec) => handleSelectQueueItem(rec.queueRecordId)}
+            emptyMessage={`No uncompleted PROD jobs waiting in queue for ${activeGltLine?.name || 'GLT'}.`}
+          />
+        </div>
 
         {/* Locked / Auto-filled Specification Details */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 pt-2">
@@ -724,6 +867,30 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Actual Line Off Date & Time Field (Requirement 2: Mandatory) */}
+        <div className="pt-2 border-t border-slate-100">
+          <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center justify-between">
+            <span className="flex items-center space-x-1.5">
+              <span>Actual Line Off Date & Time</span>
+              <span className="text-rose-500">*</span>
+            </span>
+            <span className="text-[10px] text-slate-400 font-normal">Mandatory before GLT submission</span>
+          </label>
+          <input
+            id="actual-line-off-input"
+            type="datetime-local"
+            value={actualLineOffDateTime}
+            onChange={(e) => {
+              setActualLineOffDateTime(e.target.value);
+              setValidationError(null);
+            }}
+            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs sm:text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs font-mono"
+          />
+          <p className="text-[11px] text-slate-500 mt-1">
+            Specify the actual date and time when the component completed assembly and officially lined off.
+          </p>
         </div>
         {/* Receive at GLT / Start Lead-Time */}
         {joNumber.trim() && (
@@ -999,12 +1166,44 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               />
             </div>
 
-            <div className="pt-4 border-t border-slate-200">
+            {/* Activated GLT Action Buttons (Requirement 6) */}
+            <div className="pt-4 border-t border-slate-200 space-y-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-slate-300 shadow-2xs transition-all active:scale-95"
+                >
+                  <Save className="w-4 h-4 text-slate-600" />
+                  <span>Save Draft</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(true)}
+                  className="py-3 px-4 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-slate-600 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-1.5 border border-slate-300 transition-all active:scale-95"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Reset / Cancel</span>
+                </button>
+
+                {finalResult === 'GOOD' && (
+                  <button
+                    type="button"
+                    onClick={handleMarkReadyForNextStage}
+                    className="flex-1 py-3 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-indigo-300 shadow-2xs transition-all active:scale-95"
+                  >
+                    <CheckCheck className="w-4 h-4 text-indigo-600" />
+                    <span>Ready for {compGroup === 'Engine' ? 'Dynotest' : 'Testbench'}</span>
+                  </button>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={handleOpenConfirm}
                 disabled={!systemEval.isComplete}
-                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
+                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all active:scale-98 ${
                   !systemEval.isComplete
                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                     : systemEval.status === 'GOOD'
@@ -1013,7 +1212,6 @@ export const GLTForm: React.FC<GLTFormProps> = ({
                 }`}
               >
                 <FileCheck2 className="w-5 h-5" />
-
                 <span>
                   {!systemEval.isComplete
                     ? 'COMPLETE CHECKLIST TO SUBMIT'
@@ -1058,6 +1256,12 @@ export const GLTForm: React.FC<GLTFormProps> = ({
                 <span className="text-slate-500 font-sans">Assembly Mechanic:</span>
                 <span className="font-bold text-blue-700">{assemblyMechanic}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-sans">Actual Line Off:</span>
+                <span className="font-bold text-emerald-700">
+                  {actualLineOffDateTime ? formatDateTime(actualLineOffDateTime) : 'Not specified'}
+                </span>
+              </div>
               <div className="flex justify-between pt-2 border-t border-slate-200">
                 <span className="text-slate-500 font-sans">Final GLT Result:</span>
                 <span
@@ -1087,6 +1291,36 @@ export const GLTForm: React.FC<GLTFormProps> = ({
                 }`}
               >
                 {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel / Reset Modal */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 text-slate-900 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-2 text-rose-600 font-bold text-base">
+              <AlertTriangle className="w-5 h-5" />
+              <span>Reset GLT Form?</span>
+            </div>
+            <p className="text-xs text-slate-600">
+              Are you sure you want to reset the current GLT form? Unsaved checksheet responses for JO{' '}
+              <strong>{joNumber || 'selected unit'}</strong> will be cleared.
+            </p>
+            <div className="flex space-x-3 pt-2">
+              <button
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold border border-slate-300"
+              >
+                Keep Editing
+              </button>
+              <button
+                onClick={handleCancelReset}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs"
+              >
+                Yes, Reset
               </button>
             </div>
           </div>

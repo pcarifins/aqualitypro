@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import multer from "multer";
-import { createServer as createViteServer } from "vite";
 import { store } from "./src/data/storageEngine";
 import { syncGoogleSheetsPPC, processWorkbookBuffer } from "./server/googleSheetPpcService";
 import { saveUatFixtureFile, generateUatWorkbook } from "./server/generateUatFixture";
@@ -20,9 +20,9 @@ async function startServer() {
     console.warn("Failed to generate UAT fixture file:", err);
   }
 
-  // --- REST API ENDPOINTS ---
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", app: "KRA Test Record", time: new Date().toISOString() });
+  // --- REST & HEALTH CHECK ENDPOINTS ---
+  app.get(["/health", "/api/health"], (req, res) => {
+    res.json({ status: "ok", app: "AQuality PRO", time: new Date().toISOString() });
   });
 
   // --- PPC GOOGLE SHEETS / EXCEL SYNC ENDPOINTS ---
@@ -408,15 +408,20 @@ MANDATORY WRITING DIRECTIVES:
     }
   });
 
-  // --- VITE / STATIC SERVING ---
-  if (process.env.NODE_ENV !== "production") {
+  // --- VITE (DEV) / STATIC SERVING (PROD) ---
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    (typeof __filename !== "undefined" && __filename.endsWith(".cjs"));
+
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.resolve(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

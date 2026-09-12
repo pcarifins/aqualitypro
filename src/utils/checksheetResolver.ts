@@ -237,14 +237,22 @@ export function resolveFinalTestTemplate(params: {
 
     const mergedTemplate = mergeTemplateWithStandardProfile(template, standardProfile);
 
+    const isPerformanceOnly =
+      activeRel.relationshipMode === 'PERFORMANCE_ONLY' ||
+      activeRel.templateId === 'tmpl-controlled-performance-only' ||
+      activeRel.templateId === 'tmpl-contingency-performance-only';
+
     return {
       status: 'ACTIVE',
       template,
       mergedTemplate,
       relationship: activeRel,
       standardProfile,
-      isPerformanceOnly: false,
+      isPerformanceOnly,
       compatibleLineIds: activeRel.compatibleLineIds,
+      contingencyReason: isPerformanceOnly
+        ? 'Product is operating under Controlled Performance-Only checksheet (detailed standard profile pending validation).'
+        : undefined,
     };
   }
 
@@ -270,9 +278,11 @@ export function resolveFinalTestTemplate(params: {
 /**
  * 4. Find contingency template
  */
-export function findContingencyTemplate(templates: ChecksheetTemplate[]): ChecksheetTemplate {
-  const found = templates.find(
+export function findContingencyTemplate(templates: ChecksheetTemplate[] = []): ChecksheetTemplate {
+  const list = templates || [];
+  const found = list.find(
     (t) =>
+      t.id === 'tmpl-controlled-performance-only' ||
       t.id === 'tmpl-contingency-performance-only' ||
       t.id === 'tmpl-tc-perf-v2' ||
       t.name.toLowerCase().includes('contingency') ||
@@ -283,8 +293,8 @@ export function findContingencyTemplate(templates: ChecksheetTemplate[]): Checks
 
   // Fallback minimal performance-only template
   return {
-    id: 'tmpl-contingency-performance-only',
-    name: 'Performance-Only Contingency Testbench',
+    id: 'tmpl-controlled-performance-only',
+    name: 'Controlled Performance Only',
     compGroup: 'PT-PPM',
     unitModel: 'ALL',
     component: 'ALL',
@@ -293,14 +303,14 @@ export function findContingencyTemplate(templates: ChecksheetTemplate[]): Checks
     status: 'ACTIVE',
     sections: [
       {
-        id: 'sec-contingency-perf',
+        id: 'sec-controlled-perf',
         name: 'Performance Evaluation',
         displayOrder: 1,
         items: [
           {
-            id: 'item-contingency-performance',
-            itemName: 'Performance Verification',
-            inputType: 'GOOD/NOT GOOD',
+            id: 'item-controlled-performance',
+            itemName: 'Performance',
+            inputType: 'GOOD / NOT GOOD',
             validation: 'NONE',
             displayOrder: 1,
             mandatory: true,

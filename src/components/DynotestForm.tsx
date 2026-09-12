@@ -170,6 +170,9 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     setAssemblyMechanic(record.assemblyMechanic || 'Assembler');
     setAttemptNumber(record.testType === 'RETEST' ? 2 : 1);
     setLatestGLTResult(record.gltStatus || null);
+    if (record.receivingTime) {
+      setReceivingTime(record.receivingTime);
+    }
 
     setIsLockedFromQueue(true);
 
@@ -324,8 +327,15 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     }
 
     if (!receivingTime) {
-      setValidationError('Receive at Dynotest');
-      return false;
+      const nowIso = new Date().toISOString();
+      setReceivingTime(nowIso);
+      if (joNumber) {
+        store.updateQueueRecordByJONumber(joNumber, {
+          receivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        });
+      }
     }
 
     if (!systemEval.isComplete) {
@@ -932,9 +942,9 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={!systemEval.isComplete || !receivingTime}
+                disabled={!systemEval.isComplete}
                 className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
-                  !systemEval.isComplete || !receivingTime
+                  !systemEval.isComplete
                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                     : systemEval.status === 'GOOD'
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -944,9 +954,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
                 <Send className="w-5 h-5" />
 
                 <span>
-                  {!receivingTime
-                    ? 'RECEIVE UNIT FIRST TO SUBMIT'
-                    : !systemEval.isComplete
+                  {!systemEval.isComplete
                     ? 'COMPLETE CHECKLIST TO SUBMIT'
                     : 'SUBMIT DYNOTEST RESULT'}
                 </span>

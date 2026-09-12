@@ -368,13 +368,14 @@ export async function initializeAndMigrateFirestore(): Promise<{
       }
     }
 
-    // 12. Template Relationships (All 169 authoritative products)
-    const existingRelationships = await fetchCollection<any>('templateRelationships');
+    // 12. Template Relationships (All 169 authoritative products in productChecksheetRelationships, templateRelationships, finalTestTemplateRelationships)
+    const existingRelationships = await fetchCollection<any>('productChecksheetRelationships');
     const existingRelationshipIds = new Set(existingRelationships.map((r) => r.relationshipId || r.id));
     for (const r of INITIAL_TEMPLATE_RELATIONSHIPS) {
       const rId = r.relationshipId || r.id;
       if (!existingRelationshipIds.has(rId)) {
-        console.log(`Restoring missing template relationship: ${r.relationshipId}`);
+        console.log(`Restoring missing product checksheet relationship: ${r.relationshipId}`);
+        await saveDocument('productChecksheetRelationships', r);
         await saveDocument('templateRelationships', r);
         await saveDocument('finalTestTemplateRelationships', r);
         restoredCount++;

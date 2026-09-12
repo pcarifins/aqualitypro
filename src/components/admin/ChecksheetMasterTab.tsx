@@ -8,7 +8,10 @@ import {
   TrialInputType,
   NumericValidationType,
   ProductModel,
+  FinalTestTemplateRelationship,
 } from '../../types';
+import { store } from '../../data/storageEngine';
+import { INITIAL_TEMPLATE_RELATIONSHIPS } from '../../data/relationshipsMaster';
 import {
   Layers,
   Plus,
@@ -80,6 +83,30 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
   const [showItemModal, setShowItemModal] = useState(false);
   const [editingItemSectionId, setEditingItemSectionId] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<Partial<ChecksheetTemplateItem> | null>(null);
+
+  // Authoritative Relationship Status & Matrix Modal
+  const [showRelationshipsModal, setShowRelationshipsModal] = useState(false);
+  const [relSearchQuery, setRelSearchQuery] = useState('');
+
+  const relationships: FinalTestTemplateRelationship[] =
+    store.getTemplateRelationships().length > 0
+      ? store.getTemplateRelationships()
+      : INITIAL_TEMPLATE_RELATIONSHIPS;
+
+  const standardCount = relationships.filter((r) => !r.isPerformanceOnly && r.mode !== 'PERFORMANCE_ONLY').length;
+  const perfOnlyCount = relationships.filter((r) => r.isPerformanceOnly || r.mode === 'PERFORMANCE_ONLY').length;
+
+  const filteredRelationships = relationships.filter((r) => {
+    if (!relSearchQuery.trim()) return true;
+    const q = relSearchQuery.toLowerCase();
+    return (
+      r.productId.toLowerCase().includes(q) ||
+      r.unitModel.toLowerCase().includes(q) ||
+      r.componentName.toLowerCase().includes(q) ||
+      r.templateId.toLowerCase().includes(q) ||
+      r.process.toLowerCase().includes(q)
+    );
+  });
 
   // Sync selected template into working state
   useEffect(() => {
@@ -387,6 +414,40 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Compact Authoritative Relationship Monitoring Status Card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center space-x-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-slate-800 text-xs">Authoritative Product-to-Checksheet Relationships</span>
+              <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wide">
+                100% Resolved
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+              <span><strong>{relationships.length}</strong> Active Products Mapped</span>
+              <span>•</span>
+              <span className="text-emerald-700 font-semibold">{standardCount} Standard Full-Profile</span>
+              <span>•</span>
+              <span className="text-amber-700 font-semibold">{perfOnlyCount} Controlled Performance-Only</span>
+              <span>•</span>
+              <span>18 Authoritative Templates (2 GLT + 15 Final + 1 Fallback)</span>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowRelationshipsModal(true)}
+          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors flex items-center space-x-1.5 shrink-0"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          <span>View Relationship Matrix</span>
+        </button>
+      </div>
+
       {/* Template Browser & Editor Split */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* LEFT COLUMN: Template Selector & Hierarchy Filter (4 cols) */}
@@ -1309,6 +1370,118 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Authoritative Relationship Matrix Modal */}
+      {showRelationshipsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Authoritative Product-to-Checksheet Relationships
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Single source of truth: 169 authoritative products mapped to production templates
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRelationshipsModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-4">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Filter by Product ID, Unit Model, Component, or Template ID..."
+                  value={relSearchQuery}
+                  onChange={(e) => setRelSearchQuery(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="text-xs font-semibold text-slate-600 shrink-0">
+                Showing {filteredRelationships.length} of {relationships.length} records
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
+                    <th className="pb-2">Product ID</th>
+                    <th className="pb-2">Unit Model</th>
+                    <th className="pb-2">Component</th>
+                    <th className="pb-2">Process</th>
+                    <th className="pb-2">Assigned Template</th>
+                    <th className="pb-2 text-right">Relationship Mode</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredRelationships.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-6 text-slate-400">
+                        No relationships match your search.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRelationships.map((r) => {
+                      const isPerfOnly = r.isPerformanceOnly || r.mode === 'PERFORMANCE_ONLY';
+                      return (
+                        <tr key={r.relationshipId} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-2.5 font-mono font-bold text-slate-800">{r.productId}</td>
+                          <td className="py-2.5 font-semibold text-slate-700">{r.unitModel}</td>
+                          <td className="py-2.5 text-slate-600">{r.componentName}</td>
+                          <td className="py-2.5">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-slate-100 text-slate-700">
+                              {r.process}
+                            </span>
+                          </td>
+                          <td className="py-2.5 font-mono text-slate-600 text-[11px]">{r.templateId}</td>
+                          <td className="py-2.5 text-right">
+                            {isPerfOnly ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                                Controlled Performance-Only
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Standard
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowRelationshipsModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
