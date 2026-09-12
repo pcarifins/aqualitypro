@@ -547,6 +547,8 @@ export default function App() {
         <JODetailModal
           joRecord={selectedJODetail}
           onClose={() => setSelectedJODetail(null)}
+          currentUser={authenticatedUser?.name || authenticatedUser?.username}
+          authenticatedUser={authenticatedUser}
         />
       )}
 

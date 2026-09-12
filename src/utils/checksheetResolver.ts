@@ -197,19 +197,6 @@ export function resolveFinalTestTemplate(params: {
     );
   }
 
-  // Fallback match by exact component + unitModel in active relationships if Product ID was not directly linked
-  if (!activeRel && component && unitModel && relationships && relationships.length > 0) {
-    const normComp = normalizeString(component);
-    const normUnit = normalizeString(unitModel);
-    activeRel = relationships.find(
-      (r) =>
-        r.status === 'ACTIVE' &&
-        normalizeString(r.componentName) === normComp &&
-        normalizeString(r.unitModel) === normUnit &&
-        r.finalProcess.toUpperCase() === targetProcess
-    );
-  }
-
   // 4. If active relationship found
   if (activeRel) {
     const template = templates.find((t) => t.id === activeRel!.templateId && t.status === 'ACTIVE');
@@ -237,20 +224,25 @@ export function resolveFinalTestTemplate(params: {
 
     const mergedTemplate = mergeTemplateWithStandardProfile(template, standardProfile);
 
+    const isMissingProfile = activeRel.relationshipMode !== 'PERFORMANCE_ONLY' && !standardProfile && activeRel.templateId !== 'tmpl-controlled-performance-only';
+
     const isPerformanceOnly =
       activeRel.relationshipMode === 'PERFORMANCE_ONLY' ||
       activeRel.templateId === 'tmpl-controlled-performance-only' ||
-      activeRel.templateId === 'tmpl-contingency-performance-only';
+      activeRel.templateId === 'tmpl-contingency-performance-only' ||
+      isMissingProfile;
 
     return {
-      status: 'ACTIVE',
+      status: isMissingProfile ? 'CONTINGENCY' : 'ACTIVE',
       template,
-      mergedTemplate,
+      mergedTemplate: isMissingProfile ? findContingencyTemplate(templates) : mergedTemplate,
       relationship: activeRel,
       standardProfile,
       isPerformanceOnly,
       compatibleLineIds: activeRel.compatibleLineIds,
-      contingencyReason: isPerformanceOnly
+      contingencyReason: isMissingProfile 
+        ? 'STANDARD PROFILE NOT CONFIGURED'
+        : isPerformanceOnly
         ? 'Product is operating under Controlled Performance-Only checksheet (detailed standard profile pending validation).'
         : undefined,
     };

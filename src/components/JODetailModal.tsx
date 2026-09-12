@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CombinedJORecords } from '../types';
+import { CombinedJORecords, User as AuthUser } from '../types';
 import {
   X,
   CheckCircle2,
@@ -20,12 +20,14 @@ interface JODetailModalProps {
   joRecord: CombinedJORecords | null;
   onClose: () => void;
   currentUser?: string;
+  authenticatedUser?: AuthUser | null;
 }
 
 export const JODetailModal: React.FC<JODetailModalProps> = ({
   joRecord,
   onClose,
   currentUser,
+  authenticatedUser,
 }) => {
   const [showPDFModal, setShowPDFModal] = useState(false);
 
@@ -72,15 +74,15 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
             </button>
           </div>
 
-          {/* Quick PDF Report Trigger Banner */}
+          {/* Quick PDF Quality Certificate Trigger Banner */}
           <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3">
             <div className="flex items-center space-x-2.5">
               <div className="w-8 h-8 rounded-lg bg-blue-600/30 text-blue-400 border border-blue-500/40 flex items-center justify-center font-bold shrink-0">
-                <Printer className="w-4 h-4" />
+                <Award className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-200">Official Test Report</div>
-                <div className="text-[10px] text-slate-400">Generate printable ISO/OEM formatted report</div>
+                <div className="text-xs font-bold text-slate-200">Product Quality Test Certificate</div>
+                <div className="text-[10px] text-slate-400">View and approve official KRA quality test certificate</div>
               </div>
             </div>
 
@@ -89,7 +91,7 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
               className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all shadow-xs flex items-center space-x-1.5"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>View Report PDF</span>
+              <span>Quality Certificate</span>
             </button>
           </div>
 
@@ -375,6 +377,7 @@ export const JODetailModal: React.FC<JODetailModalProps> = ({
           jo={joRecord}
           onClose={() => setShowPDFModal(false)}
           currentUser={currentUser}
+          authenticatedUser={authenticatedUser}
         />
       )}
     </>

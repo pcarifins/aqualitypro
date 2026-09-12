@@ -341,20 +341,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
       
       if (!hasRel) {
-        // Check if an exact checksheet template matches this product model
-        const exactTmpl = templates.some(t => 
-          t.status === 'ACTIVE' && 
-          t.testStage === requiredProcess && 
-          t.compGroup === prod.compGroup &&
-          ((t.compatibleProductIds && t.compatibleProductIds.includes(prod.id)) ||
-           (t.productMasterId && t.productMasterId === prod.id) ||
-           (norm(t.component) === norm(prod.component) && norm(t.unitModel) === norm(prod.unitModel)))
-        );
-
         missing.push({
           product: prod,
           requiredProcess,
-          warningType: exactTmpl ? 'NO_MAPPING_HAS_EXACT' : 'NO_MAPPING_NOR_TEMPLATE'
+          warningType: 'NO_MAPPING_NOR_TEMPLATE'
         });
       }
     });

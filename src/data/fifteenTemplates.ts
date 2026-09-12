@@ -101,7 +101,7 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 2.1 Engine Dynotest (23 products)
   templates.push(
     createTemplate(
-      'tmpl-dyno-engine-universal',
+      'tmpl-eng-dyno-v1',
       'Engine Dynotest',
       'Engine',
       'Dynotest',
@@ -303,29 +303,51 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
     )
   );
 
-  // 2.9 Axle and Final Drive HD Testbench (7 products)
+  // 2.9A Axle HD Testbench
   templates.push(
     createTemplate(
-      'tmpl-axle-fd-hd-v2',
-      'Axle and Final Drive HD Testbench',
+      'tmpl-axle-hd-v1',
+      'Axle HD Testbench',
       'PT-PPM',
       'Hydraulic Test',
       (p) =>
-        p.compGroup === 'PT-PPM' &&
-        (p.component.includes('FINAL DRIVE') || p.component.includes('AXLE')) &&
-        p.unitModel.startsWith('HD'),
+        p.compGroup === 'PT-PPM' && p.component.includes('AXLE') && p.unitModel.startsWith('HD') && !p.component.includes('FRONT'),
       [
         {
-          id: 'sec-fd-hd-inspect',
+          id: 'sec-axle-hd-inspect',
           name: 'Bearing Preload & Seal Integrity',
           displayOrder: 1,
           items: [
-            { id: 'item-fd-hub-preload', itemName: 'Hub Bearing Preload / Rolling Resistance', inputType: 'NUMERIC', unit: 'Nm', validation: 'RANGE', minimumValue: 40, maximumValue: 120, displayOrder: 1, mandatory: true, active: true },
-            { id: 'item-fd-seal-leak', itemName: 'Floating Seal Air Leakage Rate', inputType: 'NUMERIC', unit: 'kPa/min', validation: 'MAXIMUM', maximumValue: 10, displayOrder: 2, mandatory: true, active: true },
+            { id: 'item-axle-hub-preload', itemName: 'Hub Bearing Preload / Rolling Resistance', inputType: 'NUMERIC', unit: 'Nm', validation: 'RANGE', minimumValue: 40, maximumValue: 120, displayOrder: 1, mandatory: true, active: true },
+            { id: 'item-axle-seal-leak', itemName: 'Floating Seal Air Leakage Rate', inputType: 'NUMERIC', unit: 'kPa/min', validation: 'MAXIMUM', maximumValue: 10, displayOrder: 2, mandatory: true, active: true },
           ],
         },
       ],
-      'Shared Testbench checksheet for 7 Axle Assy and Final Drive HD series products.'
+      'Shared Testbench checksheet for Axle HD series products.'
+    )
+  );
+
+  // 2.9B Final Drive Wheel Testbench
+  templates.push(
+    createTemplate(
+      'tmpl-final-drive-wheel-v1',
+      'Final Drive Wheel Testbench',
+      'PT-PPM',
+      'Hydraulic Test',
+      (p) =>
+        p.compGroup === 'PT-PPM' && p.component.includes('FINAL DRIVE') && (p.unitModel.startsWith('HD') || p.unitModel.startsWith('HM') || p.unitModel.startsWith('WA') || p.unitModel.startsWith('WD')),
+      [
+        {
+          id: 'sec-fd-wheel-inspect',
+          name: 'Bearing Preload & Seal Integrity',
+          displayOrder: 1,
+          items: [
+            { id: 'item-fd-wheel-hub-preload', itemName: 'Hub Bearing Preload / Rolling Resistance', inputType: 'NUMERIC', unit: 'Nm', validation: 'RANGE', minimumValue: 40, maximumValue: 120, displayOrder: 1, mandatory: true, active: true },
+            { id: 'item-fd-wheel-seal-leak', itemName: 'Floating Seal Air Leakage Rate', inputType: 'NUMERIC', unit: 'kPa/min', validation: 'MAXIMUM', maximumValue: 10, displayOrder: 2, mandatory: true, active: true },
+          ],
+        },
+      ],
+      'Shared Testbench checksheet for Final Drive Wheel series products.'
     )
   );
 
@@ -389,8 +411,8 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 2.12 Transmission GD Testbench (3 products)
   templates.push(
     createTemplate(
-      'tmpl-transmission-gd-v2',
-      'Transmission GD Testbench',
+      'tmpl-trans-gd-v2',
+      'Transmission GD/WD Testbench',
       'PT-PPM',
       'Hydraulic Test',
       (p) => p.compGroup === 'PT-PPM' && p.component === 'TRANSMISSION' && p.unitModel.startsWith('GD'),
@@ -413,7 +435,7 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 2.13 Transmission WA Testbench (1 product)
   templates.push(
     createTemplate(
-      'tmpl-transmission-wa-v2',
+      'tmpl-trans-wa-v2',
       'Transmission WA Testbench',
       'PT-PPM',
       'Hydraulic Test',
@@ -460,8 +482,8 @@ export function getFifteenTemplates(allProducts: ProductModel[]): ChecksheetTemp
   // 2.15 Controlled Performance Only (23 products)
   templates.push(
     createTemplate(
-      'tmpl-controlled-performance-only',
-      'Controlled Performance Only',
+      'tmpl-torque-converter-performance-v1',
+      'One Performance checking point: GOOD / NOT GOOD',
       'PT-PPM',
       'Hydraulic Test',
       (p) =>

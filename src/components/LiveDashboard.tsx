@@ -54,7 +54,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   );
 
   const ptCylLines = useMemo(
-    () => testingLines.filter((l) => l.componentGroup !== 'Engine'),
+    () => testingLines.filter((l) => l.componentGroup !== 'Engine' && l.id !== 'glt-pt-ppm'),
     [testingLines]
   );
 
@@ -395,7 +395,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
           <div>
             <h3 className="text-xs font-black uppercase tracking-wider">
-              POWER TRAIN & CYLINDER TESTING (6 STATIONS)
+              POWER TRAIN & CYLINDER TESTING (5 STATIONS)
             </h3>
             <p className="text-[11px] text-slate-500">
               Live Power Train, Cylinder, GLT, and Testbench station status

@@ -355,6 +355,13 @@ export interface PDFTestReportRecord {
   dataSnapshot: any;
 }
 
+export interface ElectronicStampVerification {
+  name: string;
+  timestamp: string;
+  role?: string;
+  verified?: boolean;
+}
+
 export interface QualityCertificateRecord {
   certificateId: string;
   testRecordId: string;
@@ -366,6 +373,9 @@ export interface QualityCertificateRecord {
   issuedAt?: string; // Alias
   generatedBy: string;
   issuedBy?: string; // Alias
+  operatorVerification?: ElectronicStampVerification;
+  supervisorVerification?: ElectronicStampVerification & { approved: boolean };
+  dataSnapshot?: any;
 }
 
 // Immutable Snapshot captured at test start/submission
@@ -555,6 +565,7 @@ export interface CombinedJORecords {
   partNumber?: string;
   latestStage?: string;
   assemblyMechanic: string;
+  actualLineOffDateTime?: string;
   currentOverallStatus: TestResult;
   everHadNG: boolean;
   gltRecords: GLTRecord[];

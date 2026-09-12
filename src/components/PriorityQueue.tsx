@@ -590,63 +590,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
                         {/* Action */}
                         <td className="py-3 px-4 whitespace-nowrap text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
-                            {canReorder && !item.priorityLocked && !isOnProcess && !isFinish && (
-                              <div className="flex items-center space-x-0.5 mr-1">
-                                <button
-                                  onClick={() => handleMoveUp(item)}
-                                  disabled={item.currentPriority <= 1}
-                                  className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 disabled:opacity-30 rounded transition-all cursor-pointer"
-                                  title="Move Priority Up"
-                                >
-                                  <ArrowUp className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={() => handleMoveDown(item)}
-                                  className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded transition-all cursor-pointer"
-                                  title="Move Priority Down"
-                                >
-                                  <ArrowDown className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-
-                            <button
-                              onClick={() => {
-                                setSelectedQueueItem(item);
-                                setShowHistoryModal(true);
-                              }}
-                              className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-md transition-all cursor-pointer"
-                              title="Audit History"
-                            >
-                              <History className="w-3.5 h-3.5" />
-                            </button>
-
-                            <button
-                              onClick={() => onOpenJODetail(item.joRoNumber)}
-                              className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all border border-slate-200 cursor-pointer"
-                              title="View JO Details"
-                            >
-                              Detail
-                            </button>
-
-                            {onStartTest && !isFinish && (
-                              <button
-                                onClick={() => onStartTest(item.joRoNumber, item.compGroup, item.testType, item.gltStatus)}
-                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all flex items-center space-x-1 shadow-2xs cursor-pointer ${
-                                  isOnProcess
-                                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                }`}
-                                title={isOnProcess ? 'Resume Session' : 'Start Test'}
-                              >
-                                <Play className="w-3 h-3 fill-current" />
-                                <span>{isOnProcess ? 'Resume' : 'Start'}</span>
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                          <div className="flex items-center justify-end space-x-1.5"></div></td></tr>
                     );
                   })}
                 </tbody>
@@ -824,67 +768,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
                   {/* Right Actions & Sequence Controls */}
                   <div className="flex items-center justify-between lg:justify-end gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-                    {/* Up/Down Reorder Controls (PPC / Supervisor / Admin only) */}
-                    {canReorder && !item.priorityLocked && !isOnProcess && !isFinish && (
-                      <div className="flex items-center space-x-1 mr-1">
-                        <button
-                          onClick={() => handleMoveUp(item)}
-                          disabled={item.currentPriority <= 1}
-                          className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 disabled:opacity-30 rounded-lg transition-all"
-                          title="Move Priority Up"
-                        >
-                          <ArrowUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleMoveDown(item)}
-                          className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-lg transition-all"
-                          title="Move Priority Down"
-                        >
-                          <ArrowDown className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* History Audit Button */}
-                    <button
-                      onClick={() => {
-                        setSelectedQueueItem(item);
-                        setShowHistoryModal(true);
-                      }}
-                      className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-xl transition-all text-xs flex items-center space-x-1"
-                      title="View Priority Audit History"
-                    >
-                      <History className="w-3.5 h-3.5" />
-                    </button>
-
-                    {/* Open JO Detail Button */}
-                    <button
-                      onClick={() => onOpenJODetail(item.joRoNumber)}
-                      className="bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl transition-all border border-slate-200 flex items-center space-x-1 cursor-pointer"
-                    >
-                      <span>Detail</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-
-                    {/* Direct Test Execution Action */}
-                    {onStartTest && !isFinish && (
-                      <button
-                        onClick={() => onStartTest(item.joRoNumber, item.compGroup, item.testType, item.gltStatus)}
-                        className={`text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer ${
-                          isOnProcess
-                            ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                        }`}
-                        title={isOnProcess ? 'Resume Active Testing Session' : 'Start Testing Now'}
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>{isOnProcess ? 'Resume' : 'Start Test'}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                    </div></div>);})}
           </div>
         )}
       </div>
