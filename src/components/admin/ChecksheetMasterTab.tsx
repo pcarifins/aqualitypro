@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
+import {   
   ChecksheetTemplate,
   ChecksheetSection,
   ChecksheetTemplateItem,
@@ -36,7 +36,7 @@ import {
   HelpCircle,
   Eye,
   ShieldCheck,
-} from 'lucide-react';
+   } from 'lucide-react';
 
 interface ChecksheetMasterTabProps {
   templates: ChecksheetTemplate[];
@@ -73,7 +73,15 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
 
   // Full Editor Active Template
   const [workingTemplate, setWorkingTemplate] = useState<ChecksheetTemplate | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+const [showAssignModal, setShowAssignModal] = useState(false);
+const [assignTemplateId, setAssignTemplateId] = useState('');
+const [assignUnitModel, setAssignUnitModel] = useState('');
+const [assignComponent, setAssignComponent] = useState('');
+const [assignError, setAssignError] = useState(null);
+const [assignSuccess, setAssignSuccess] = useState(null);
+
 
   // Section Modal
   const [showSectionModal, setShowSectionModal] = useState(false);
@@ -652,13 +660,21 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
                   </button>
 
                   <button
-                    type="button"
-                    onClick={() => handleDelete(workingTemplate.id)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                    title="Delete Template"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+    type="button"
+    onClick={(e) => {
+      e.stopPropagation();
+      setAssignTemplateId(workingTemplate.id);
+      setAssignUnitModel('');
+      setAssignComponent('');
+      setAssignError(null);
+      setAssignSuccess(null);
+      setShowAssignModal(true);
+    }}
+    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+    title="Assign Template to Model"
+  >
+    <FileText className="w-4 h-4" />
+  </button>
                 </div>
               </div>
 
@@ -1485,6 +1501,87 @@ export const ChecksheetMasterTab: React.FC<ChecksheetMasterTabProps> = ({
           </div>
         </div>
       )}
+
+      {showAssignModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center space-x-2">
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span>Assign Template to Product</span>
+              </h2>
+              <button onClick={() => setShowAssignModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {assignError && (
+              <div className="mb-4 bg-rose-50 text-rose-700 text-xs px-3 py-2 rounded-lg font-bold">
+                {assignError}
+              </div>
+            )}
+            {assignSuccess && (
+              <div className="mb-4 bg-emerald-50 text-emerald-800 text-xs px-3 py-2 rounded-lg font-bold">
+                {assignSuccess}
+              </div>
+            )}
+            <form onSubmit={handleAssignSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Target Template
+                </label>
+                <div className="bg-slate-50 border border-slate-200 text-slate-600 text-xs px-3 py-2 rounded-lg font-mono font-bold truncate">
+                  {templates.find(t => t.id === assignTemplateId)?.name || assignTemplateId}
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Select Unit Model
+                </label>
+                <select 
+                  required
+                  value={assignUnitModel} 
+                  onChange={(e) => {
+                    setAssignUnitModel(e.target.value);
+                    setAssignComponent('');
+                  }}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold"
+                >
+                  <option value="">-- Choose Unit Model --</option>
+                  {Array.from(new Set(productModels.filter(m => m.active !== false).map(m => m.unitModel.trim().toUpperCase()))).sort().map(um => (
+                    <option key={um} value={um}>{um}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Select Component Name
+                </label>
+                <select 
+                  required
+                  disabled={!assignUnitModel}
+                  value={assignComponent} 
+                  onChange={(e) => setAssignComponent(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold"
+                >
+                  <option value="">-- Choose Component --</option>
+                  {Array.from(new Set(productModels.filter(m => m.active !== false && m.unitModel.trim().toUpperCase() === assignUnitModel).map(m => (m.component || m.compName || '').trim().toUpperCase()).filter(Boolean))).sort().map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="pt-2 flex justify-end space-x-2">
+                <button type="button" onClick={() => setShowAssignModal(false)} className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer">
+                  Cancel
+                </button>
+                <button type="submit" disabled={!assignUnitModel || !assignComponent} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50">
+                  Assign Template
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

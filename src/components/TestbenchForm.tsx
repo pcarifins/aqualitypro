@@ -35,6 +35,7 @@ import {
   calculateMinutesBetween,
 } from '../utils/formatters';
 import { AITroubleshootingCard } from './AITroubleshootingCard';
+import { Top3QueueCards } from './Top3QueueCards';
 
 interface TestbenchFormProps {
   currentUser: User;
@@ -583,41 +584,14 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
         </div>
 
         {/* Priority JO Selector */}
-        {queueRecords.length === 0 ? (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
-            <div className="text-xs font-bold text-slate-700">No JO Available for Testbench</div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Ready PT-PPM and Cylinder jobs will appear here once GLT is passed (GOOD) or when a RETEST job is scheduled.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {queueRecords.map((q) => {
-              const isSelected = selectedQueueId === q.queueRecordId;
-              return (
-                <div
-                  key={q.queueRecordId}
-                  onClick={() => handleSelectQueueItem(q.queueRecordId)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                    isSelected 
-                      ? 'bg-blue-50 border-blue-400 shadow-md ring-1 ring-blue-400' 
-                      : 'bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-1.5">
-                    <span className="text-sm font-black text-slate-800">{q.joRoNumber}</span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-600">
-                      {q.status}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    <span className="font-bold text-slate-700">{q.unitModel}</span> • {q.component}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <Top3QueueCards
+          cards={queueRecords.slice(0, 3)}
+          selectedJONumber={joNumber}
+          selectedQueueId={selectedQueueId}
+          onSelectCard={(rec) => handleSelectQueueItem(rec.queueRecordId)}
+          emptyMessage="No uncompleted PT-PPM or Cylinder jobs waiting in queue."
+          accentColor="cyan"
+        />
 
         {/* Locked / Auto-filled Specification Details */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 pt-2">

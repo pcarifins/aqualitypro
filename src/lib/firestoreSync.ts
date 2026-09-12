@@ -121,12 +121,12 @@ export async function fetchCollection<T>(collectionName: string): Promise<T[]> {
 }
 
 export async function saveDocument<
-  T extends { id?: string; queueRecordId?: string; reportId?: string; certificateId?: string; profileId?: string; relationshipId?: string }
+  T extends { id?: string; queueRecordId?: string; reportId?: string; certificateId?: string; profileId?: string; relationshipId?: string; standardProfileId?: string }
 >(collectionName: string, data: T): Promise<void> {
-  const docId = data.id || data.queueRecordId || data.reportId || data.certificateId || data.profileId || data.relationshipId;
+  const docId = data.id || data.queueRecordId || data.reportId || data.certificateId || data.profileId || data.relationshipId || data.standardProfileId;
   if (!docId) {
     throw new Error(
-      `Cannot save to ${collectionName}: Missing document id, queueRecordId, reportId, or certificateId`
+      `Cannot save to ${collectionName}: Missing document id, queueRecordId, reportId, certificateId, profileId, relationshipId, or standardProfileId`
     );
   }
   const cleanData = sanitizeFirestoreValue(data);

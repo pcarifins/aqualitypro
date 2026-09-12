@@ -1,409 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  ListOrdered,
-  AlertTriangle,
-  Sparkles,
-  ArrowUp,
-  ArrowDown,
-  Lock,
-  Plus,
-  RefreshCw,
-  Search,
-  ExternalLink,
-  CheckCircle2,
-  Clock,
-  Layers,
-  ChevronRight,
-  SlidersHorizontal,
-  Info,
-  Check,
-  X,
-  History,
-  Gauge,
-  Calendar,
-  Play,
-} from 'lucide-react';
-import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine, TestOverride } from '../types';
-import { apiClient } from '../api/client';
-import { store } from '../data/storageEngine';
-import { calculateOverallCapacity, calculateScheduleForQueue } from '../utils/capacityCalculator';
-import { LineSetupModal } from './LineSetupModal';
+const fs = require('fs');
+let code = fs.readFileSync('src/components/PriorityQueue.tsx', 'utf-8');
 
-interface PriorityQueueProps {
-  currentUserRole: UserRole | string;
-  currentUserName: string;
-  onOpenJODetail: (joNumber: string) => void;
-  onStartTest?: (joNumber: string, compGroup: CompGroup, testType?: 'PROD' | 'RETEST', gltStatus?: string) => void;
-}
+// The instruction is to show one compact control card at the top.
+// Let's find the start of the return statement.
+const returnStart = code.indexOf('return (');
+const preReturn = code.substring(0, returnStart);
 
-export const PriorityQueue: React.FC<PriorityQueueProps> = ({
-  currentUserRole,
-  currentUserName,
-  onOpenJODetail,
-  onStartTest,
-}) => {
-  const [selectedCompGroup, setSelectedCompGroup] = useState<CompGroup>('Engine');
-  const [queueList, setQueueList] = useState<QueueRecord[]>([]);
-  const [productModels, setProductModels] = useState<ProductModel[]>([]);
-  const [testingLines, setTestingLines] = useState<TestingLine[]>([]);
-  const [testOverrides, setTestOverrides] = useState<TestOverride[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmittingJO, setIsSubmittingJO] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  // Modals
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showReorderModal, setShowReorderModal] = useState(false);
-  const [showUrgentModal, setShowUrgentModal] = useState(false);
-  const [showLineSetupModal, setShowLineSetupModal] = useState(false);
-  const [selectedQueueItem, setSelectedQueueItem] = useState<QueueRecord | null>(null);
-  const [targetPriority, setTargetPriority] = useState<number>(1);
-  const [reorderRemark, setReorderRemark] = useState('');
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-
-  // New JO Form State
-  const [newJoNumber, setNewJoNumber] = useState('');
-  const [newUnitModel, setNewUnitModel] = useState('');
-  const [newComponent, setNewComponent] = useState('');
-  const [selectedProductModelId, setSelectedProductModelId] = useState('');
-  const [newSubGroup, setNewSubGroup] = useState<'PT' | 'PPM' | ''>('');
-  const [newTestType, setNewTestType] = useState<'PROD' | 'RETEST'>('PROD');
-  const [newPlannedPriority, setNewPlannedPriority] = useState<number>(1);
-  const [newCustomer, setNewCustomer] = useState('');
-  const [newPartNumber, setNewPartNumber] = useState('');
-  const [newSerialNumber, setNewSerialNumber] = useState('');
-  const [newMechanic, setNewMechanic] = useState('');
-  const [newIsUrgent, setNewIsUrgent] = useState(false);
-  const [assemblersList, setAssemblersList] = useState<any[]>([]);
-
-  const roleUpper = (currentUserRole || '').toUpperCase();
-  const canReorder = roleUpper === 'PPC' || roleUpper === 'SUPERVISOR' || roleUpper === 'ADMIN';
-
-  const loadQueue = async () => {
-    setIsLoading(true);
-    const records = await apiClient.getQueueRecords();
-    setQueueList(records);
-    setIsLoading(false);
-  };
-
-  const loadProductModels = async () => {
-    const models = await apiClient.getProductModels(true);
-    setProductModels(models || []);
-  };
-
-  const loadTestingLines = async () => {
-    const lines = await apiClient.getTestingLines();
-    setTestingLines(lines || []);
-  };
-
-  const loadTestOverrides = async () => {
-    const overrides = await apiClient.getTestOverrides();
-    setTestOverrides(overrides || []);
-  };
-
-  const loadAssemblers = async () => {
-    try {
-      const asms = await apiClient.getAssemblers(true);
-      setAssemblersList(asms || []);
-    } catch (err) {
-      console.error('Failed to load assemblers:', err);
-    }
-  };
-
-  useEffect(() => {
-    loadQueue();
-    loadProductModels();
-    loadTestingLines();
-    loadTestOverrides();
-    loadAssemblers();
-
-    const unsubscribe = store.subscribe(() => {
-      loadQueue();
-      loadTestingLines();
-      loadTestOverrides();
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  // Compute Overall Capacity & Line Statistics
-  const overallCapacityStats = useMemo(() => {
-    return calculateOverallCapacity(queueList, testingLines, testOverrides);
-  }, [queueList, testingLines, testOverrides]);
-
-  const handleAssignTestingLine = async (queueRecordId: string, testingLineId: string) => {
-    try {
-      const { store } = await import('../data/storageEngine');
-      await store.updateQueueRecord(queueRecordId, { testingLineId });
-      await loadQueue();
-    } catch (err) {
-      console.error('Failed to update testing line assignment:', err);
-    }
-  };
-
-  const handleAssignMechanic = async (queueRecordId: string, assemblyMechanic: string) => {
-    try {
-      const { store } = await import('../data/storageEngine');
-      await store.updateQueueRecord(queueRecordId, { assemblyMechanic });
-      await loadQueue();
-    } catch (err) {
-      console.error('Failed to update assembly mechanic:', err);
-    }
-  };
-
-  // Filter Product Models by selected Queue / CompGroup
-  const eligibleProductModels = useMemo(() => {
-    return productModels.filter((m) => {
-      if (m.active === false) return false;
-      if (m.compGroup === selectedCompGroup) return true;
-      if (selectedCompGroup === 'Engine' && (m.category === 'Engine' || m.modelName?.toLowerCase().includes('engine'))) return true;
-      if (
-        selectedCompGroup === 'PT-PPM' &&
-        (m.category === 'Power Train' || m.category === 'PPM' || m.category === 'PT-PPM' || m.category === 'Power Train Component')
-      )
-        return true;
-      if (selectedCompGroup === 'Cylinder' && m.category === 'Cylinder') return true;
-      return false;
-    });
-  }, [productModels, selectedCompGroup]);
-
-  // Unique Unit Models for dropdown
-  const availableUnitModels = useMemo(() => {
-    return Array.from(
-      new Set(eligibleProductModels.map((m) => m.unitModel.trim().toUpperCase()))
-    ).sort();
-  }, [eligibleProductModels]);
-
-  // Dependent Component options based on selected Unit Model
-  const availableComponents = useMemo(() => {
-    if (!newUnitModel) return [];
-    return Array.from(
-      new Set(
-        eligibleProductModels
-          .filter((m) => m.unitModel.trim().toUpperCase() === newUnitModel.trim().toUpperCase())
-          .map((m) => (m.component || m.compName || '').trim().toUpperCase())
-          .filter(Boolean)
-      )
-    ).sort();
-  }, [eligibleProductModels, newUnitModel]);
-
-  // Filter queue by Comp Group & Search
-  const filteredGroupQueue = queueList.filter((q) => {
-    if (q.compGroup !== selectedCompGroup) return false;
-    if (searchQuery.trim()) {
-      const s = searchQuery.trim().toUpperCase();
-      const matchJO = q.joRoNumber.toUpperCase().includes(s);
-      const matchUnit = q.unitModel.toUpperCase().includes(s);
-      const matchComp = q.component.toUpperCase().includes(s);
-      if (!matchJO && !matchUnit && !matchComp) return false;
-    }
-    return true;
-  });
-
-  const urgentUnassigned = filteredGroupQueue.filter((q) => q.isUrgentUnassigned && q.status === 'WAITING');
-  
-  const rankedQueue = filteredGroupQueue
-    .filter((q) => !q.isUrgentUnassigned)
-    .sort((a, b) => {
-      if (a.status === 'ON_PROCESS' && b.status !== 'ON_PROCESS') return -1;
-      if (b.status === 'ON_PROCESS' && a.status !== 'ON_PROCESS') return 1;
-      if (a.status === 'FINISH' && b.status !== 'FINISH') return 1;
-      if (b.status === 'FINISH' && a.status !== 'FINISH') return -1;
-
-      if (a.isTopPriority && !b.isTopPriority) return -1;
-      if (!a.isTopPriority && b.isTopPriority) return 1;
-      if (a.isTopPriority && b.isTopPriority) {
-        return (a.topPriorityRank || 0) - (b.topPriorityRank || 0);
-      }
-
-      return a.currentPriority - b.currentPriority;
-    });
-
-
-  // Compute Schedule (Est Start/Finish) for Ranked Queue
-  const scheduledRankedQueue = useMemo(() => {
-    return calculateScheduleForQueue(rankedQueue, testingLines, testOverrides);
-  }, [rankedQueue, testingLines, testOverrides]);
-
-  const handleSyncPPC = async () => {
-    setIsLoading(true);
-    const res = await apiClient.syncPPCDataSource(currentUserName);
-    setSyncFeedback(`PPC Sync completed: ${res.added} new jobs added, ${res.updated} updated.`);
-    await loadQueue();
-    setTimeout(() => setSyncFeedback(null), 5000);
-  };
-
-  const handleMoveUp = (item: QueueRecord) => {
-    if (!canReorder || item.priorityLocked || item.status === 'ON_PROCESS') return;
-    if (item.currentPriority <= 1) return;
-    setSelectedQueueItem(item);
-    setTargetPriority(item.currentPriority - 1);
-    setReorderRemark(`Promoted priority from ${item.currentPriority} to ${item.currentPriority - 1}`);
-    setShowReorderModal(true);
-  };
-
-  const handleMoveDown = (item: QueueRecord) => {
-    if (!canReorder || item.priorityLocked || item.status === 'ON_PROCESS') return;
-    setSelectedQueueItem(item);
-    setTargetPriority(item.currentPriority + 1);
-    setReorderRemark(`Deprioritized from ${item.currentPriority} to ${item.currentPriority + 1}`);
-    setShowReorderModal(true);
-  };
-
-  const handleConfirmReorder = async () => {
-    if (!selectedQueueItem || !reorderRemark.trim()) return;
-    await apiClient.reorderQueue(
-      selectedQueueItem.compGroup,
-      selectedQueueItem.queueRecordId,
-      targetPriority,
-      currentUserName,
-      reorderRemark.trim()
-    );
-    setShowReorderModal(false);
-    setSelectedQueueItem(null);
-    setReorderRemark('');
-    await loadQueue();
-  };
-
-  const handleOpenAssignUrgent = (item: QueueRecord) => {
-    setSelectedQueueItem(item);
-    setTargetPriority(1);
-    setReorderRemark('Urgent breakdown job prioritized for testing');
-    setShowUrgentModal(true);
-  };
-
-  const handleConfirmAssignUrgent = async () => {
-    if (!selectedQueueItem || !reorderRemark.trim()) return;
-    await apiClient.assignUrgentPriority(
-      selectedQueueItem.queueRecordId,
-      targetPriority,
-      currentUserName,
-      reorderRemark.trim()
-    );
-    setShowUrgentModal(false);
-    setSelectedQueueItem(null);
-    setReorderRemark('');
-    await loadQueue();
-  };
-
-  const handleApplyAI = async (item: QueueRecord) => {
-    if (!canReorder) return;
-    await apiClient.applyAIRecommendation(item.queueRecordId, currentUserName);
-    await loadQueue();
-  };
-
-  const handleSaveNewJO = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-
-    const cleanJo = newJoNumber.trim().toUpperCase();
-    if (!cleanJo) {
-      setFormError('Please enter a valid JO / RO Number.');
-      return;
-    }
-    if (!newUnitModel) {
-      setFormError('Please select a Unit Model from Product Master.');
-      return;
-    }
-    if (!newComponent) {
-      setFormError('Please select a Component from Product Master.');
-      return;
-    }
-
-    // Check duplicate active JO (STEP 28)
-    const activeExists = queueList.some(
-      (q) => q.status !== 'FINISH' && q.joRoNumber.trim().toUpperCase() === cleanJo
-    );
-    if (activeExists) {
-      setFormError('JO / RO Number already exists in the active queue.');
-      return;
-    }
-
-    // Normal JO priority = highest active ranked priority + 1 (STEP 19)
-    const activeRankedInGroup = queueList.filter(
-      (q) =>
-        q.compGroup === selectedCompGroup &&
-        !q.isUrgentUnassigned &&
-        (q.status === 'WAITING' || q.status === 'ON_PROCESS')
-    );
-    const maxPrio = activeRankedInGroup.reduce(
-      (max, q) => Math.max(max, q.currentPriority || 0),
-      0
-    );
-    const nextPrio = maxPrio + 1;
-    const assignedPriority = newIsUrgent ? 999 : nextPrio;
-
-    const newRecord: QueueRecord = {
-      queueRecordId: `qr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      joRoNumber: cleanJo,
-      compGroup: selectedCompGroup,
-      productModelId: selectedProductModelId || undefined,
-      subGroup: selectedCompGroup === 'PT-PPM' ? newSubGroup || null : null,
-      unitModel: newUnitModel.trim().toUpperCase(),
-      component: newComponent.trim().toUpperCase(),
-      testType: newTestType,
-      plannedPriority: assignedPriority,
-      currentPriority: assignedPriority,
-      isUrgentUnassigned: newIsUrgent,
-      status: 'WAITING',
-      priorityLocked: false,
-      customer: newCustomer.trim() || 'Internal Stock',
-      partNumber: newPartNumber.trim(),
-      serialNumber: newSerialNumber.trim(),
-      assemblyMechanic: newMechanic.trim() || 'Unassigned',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      history: [
-        {
-          oldPriority: 0,
-          newPriority: assignedPriority,
-          remark: `Manually added to queue by ${currentUserName}`,
-          changedBy: currentUserName,
-          changedAt: new Date().toISOString(),
-        },
-      ],
-    };
-
-    if (newTestType === 'RETEST') {
-      newRecord.aiRecommendation = {
-        suggestedPriority: 1,
-        reason: 'Retest inspection required before release.',
-      };
-    }
-
-    try {
-      setIsSubmittingJO(true);
-      const { store } = await import('../data/storageEngine');
-      await store.addQueueRecord(newRecord, currentUserName);
-
-      setShowAddModal(false);
-      setNewJoNumber('');
-      setNewUnitModel('');
-      setNewComponent('');
-      setSelectedProductModelId('');
-      setNewCustomer('');
-      setNewPartNumber('');
-      setNewSerialNumber('');
-      setNewMechanic('');
-      setNewIsUrgent(false);
-      setFormError(null);
-      await loadQueue();
-    } catch (err: any) {
-      setFormError(`Failed to save JO to Firestore: ${err?.message || 'Network error'}`);
-    } finally {
-      setIsSubmittingJO(false);
-    }
-  };
-
-
+// We need to add a function to toggle star priority
+const toggleStarFn = `
   const handleToggleStar = async (item: QueueRecord, destinationProcess: string) => {
     if (!canReorder || item.status === 'ON_PROCESS' || item.status === 'FINISH') return;
 
     if (item.isTopPriority) {
+      // Unstar
       try {
         const { store } = await import('../data/storageEngine');
         await store.updateQueueRecord(item.queueRecordId, {
@@ -418,9 +27,10 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
         console.error(err);
       }
     } else {
+      // Star (Max 3 per destination)
       const currentStarred = queueList.filter(q => q.isTopPriority && q.priorityDestination === destinationProcess && q.status === 'WAITING');
       if (currentStarred.length >= 3) {
-        alert(`Maximum of 3 starred JOs allowed for ${destinationProcess}. Please unstar an existing JO first.`);
+        alert(\`Maximum of 3 starred JOs allowed for \${destinationProcess}. Please unstar an existing JO first.\`);
         return;
       }
       try {
@@ -438,7 +48,9 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       }
     }
   };
-  return (
+`;
+
+const newReturn = `return (
     <div className="space-y-4 max-w-7xl mx-auto pb-12 animate-in fade-in duration-300">
       {/* COMPACT CONTROL CARD */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center gap-4">
@@ -462,9 +74,9 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
               <button
                 key={group}
                 onClick={() => setSelectedCompGroup(group as CompGroup)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={\`px-4 py-2 rounded-xl text-xs font-bold transition-all \${
                   isSelected ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                }\`}
               >
                 {group}
               </button>
@@ -480,7 +92,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
             className="flex items-center space-x-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition-all cursor-pointer"
             title="Sync PPC"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={\`w-4 h-4 \${isLoading ? 'animate-spin' : ''}\`} />
           </button>
           {canReorder && (
             <button
@@ -519,6 +131,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                 const isOnProcess = item.status === 'ON_PROCESS';
                 const isFinish = item.status === 'FINISH';
                 
+                // Determine destination process for starring
                 let destinationProcess = 'Testbench';
                 if (item.compGroup === 'Engine') {
                   destinationProcess = item.gltStatus === 'GOOD' || item.testType === 'RETEST' ? 'Dynotest' : 'GLT';
@@ -527,19 +140,19 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                 }
 
                 return (
-                  <tr key={item.queueRecordId} className={`hover:bg-slate-50 transition-colors ${isOnProcess ? 'bg-amber-50/30' : isFinish ? 'bg-emerald-50/20' : ''}`}>
+                  <tr key={item.queueRecordId} className={\`hover:bg-slate-50 transition-colors \${isOnProcess ? 'bg-amber-50/30' : isFinish ? 'bg-emerald-50/20' : ''}\`}>
                     <td className="py-3 px-4 whitespace-nowrap flex items-center space-x-3">
                       <button
                         disabled={!canReorder || isOnProcess || isFinish}
                         onClick={() => handleToggleStar(item, destinationProcess)}
-                        className={`p-1.5 rounded-lg transition-all ${
+                        className={\`p-1.5 rounded-lg transition-all \${
                           item.isTopPriority 
                             ? 'bg-amber-100 text-amber-500 hover:bg-amber-200' 
                             : 'bg-slate-100 text-slate-300 hover:text-amber-400 hover:bg-slate-200'
-                        } ${(!canReorder || isOnProcess || isFinish) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        } \${(!canReorder || isOnProcess || isFinish) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}\`}
                         title={item.isTopPriority ? 'Unstar JO' : 'Star as Top 3 Priority'}
                       >
-                        <Sparkles className={`w-4 h-4 ${item.isTopPriority ? 'fill-current' : ''}`} />
+                        <Sparkles className={\`w-4 h-4 \${item.isTopPriority ? 'fill-current' : ''}\`} />
                       </button>
                       <div className="flex flex-col">
                         <span className="font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-xs inline-block w-fit">
@@ -577,6 +190,7 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap text-right">
+                      {/* Only direct JO Detail navigation allowed */}
                       <button
                         onClick={() => onOpenJODetail(item.joRoNumber)}
                         className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
@@ -603,12 +217,13 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 shadow-xl border border-slate-200">
+            {/* Same Add Modal Content */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
               <h2 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center space-x-2">
                 <Plus className="w-4 h-4 text-blue-600" />
                 <span>Add Manual JO / RO</span>
               </h2>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -666,9 +281,9 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                       setSelectedProductModelId('');
                       setFormError(null);
                     }}
-                    className={`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white ${
+                    className={\`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white \${
                       eligibleProductModels.length === 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''
-                    }`}
+                    }\`}
                   >
                     <option value="">-- Select Unit Model --</option>
                     {availableUnitModels.map((um) => (
@@ -699,11 +314,11 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                         setSelectedProductModelId(match.id);
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white ${
+                    className={\`w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 font-bold bg-white \${
                       !newUnitModel || eligibleProductModels.length === 0
                         ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                         : ''
-                    }`}
+                    }\`}
                   >
                     <option value="">
                       {!newUnitModel ? 'Select Unit Model First' : '-- Select Component --'}
@@ -746,11 +361,11 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                   <button
                     type="submit"
                     disabled={eligibleProductModels.length === 0 || isSubmittingJO}
-                    className={`text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs flex items-center space-x-1 cursor-pointer ${
+                    className={\`text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs flex items-center space-x-1 cursor-pointer \${
                       eligibleProductModels.length === 0 || isSubmittingJO
                         ? 'bg-slate-300 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
+                    }\`}
                   >
                     {isSubmittingJO && <RefreshCw className="w-3 h-3 animate-spin mr-1" />}
                     <span>{isSubmittingJO ? 'Saving...' : 'Save to Queue'}</span>
@@ -764,3 +379,30 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     </div>
   );
 };
+`;
+
+let result = preReturn + toggleStarFn + newReturn;
+
+// Update calculateScheduleForQueue sorting logic to respect top priority
+const rankedQueueRegex = /const rankedQueue = filteredGroupQueue[\s\S]*?\}\);/;
+const newRankedQueue = `
+  const rankedQueue = filteredGroupQueue
+    .filter((q) => !q.isUrgentUnassigned)
+    .sort((a, b) => {
+      if (a.status === 'ON_PROCESS' && b.status !== 'ON_PROCESS') return -1;
+      if (b.status === 'ON_PROCESS' && a.status !== 'ON_PROCESS') return 1;
+      if (a.status === 'FINISH' && b.status !== 'FINISH') return 1;
+      if (b.status === 'FINISH' && a.status !== 'FINISH') return -1;
+
+      if (a.isTopPriority && !b.isTopPriority) return -1;
+      if (!a.isTopPriority && b.isTopPriority) return 1;
+      if (a.isTopPriority && b.isTopPriority) {
+        return (a.topPriorityRank || 0) - (b.topPriorityRank || 0);
+      }
+
+      return a.currentPriority - b.currentPriority;
+    });
+`;
+result = result.replace(rankedQueueRegex, newRankedQueue);
+
+fs.writeFileSync('src/components/PriorityQueue.tsx', result);

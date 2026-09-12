@@ -324,6 +324,12 @@ export interface QueueRecord {
   currentPriority: number;
   isUrgentUnassigned?: boolean;
   status: 'WAITING' | 'ON_PROCESS' | 'FINISH';
+  isTopPriority?: boolean;
+  topPriorityRank?: number;
+  priorityDestination?: string;
+  priorityLineId?: string;
+  prioritySelectedBy?: string;
+  prioritySelectedAt?: string;
   gltStatus?: 'GOOD' | 'NOT_GOOD' | 'PENDING';
   gltReceivingTime?: string;
   receivingTime?: string; // Standard receiving ISO timestamp for active testing process

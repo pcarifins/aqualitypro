@@ -1117,77 +1117,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Create Link Form */}
-                  <div className="lg:col-span-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4 h-fit">
-                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Configure New Relationship</h4>
-                    <form onSubmit={handleSaveRelationship} className="space-y-3.5">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Product Master</label>
-                        <select
-                          value={relProductId}
-                          onChange={(e) => setRelProductId(e.target.value)}
-                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="">-- Select Product Model --</option>
-                          {productModels.map((prod) => (
-                            <option key={prod.id} value={prod.id}>
-                              [{prod.compGroup}] {prod.component} - {prod.unitModel}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Testing Stage Process</label>
-                        <select
-                          value={relProcess}
-                          onChange={(e) => setRelProcess(e.target.value as any)}
-                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="Dynotest">Dynotest Engine Performance</option>
-                          <option value="Testbench">Testbench Hydraulic Performance</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Target Checksheet Template</label>
-                        <select
-                          value={relTemplateId}
-                          onChange={(e) => setRelTemplateId(e.target.value)}
-                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="">-- Select Template --</option>
-                          {templates
-                            .filter(t => t.status === 'ACTIVE' && (t.testStage === relProcess || (relProcess === 'Testbench' && t.testStage === 'Hydraulic Test')))
-                            .map((tmpl) => (
-                              <option key={tmpl.id} value={tmpl.id}>
-                                {tmpl.name} (v{tmpl.revision || 1})
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-600 uppercase mb-1">Initial Mapping Status</label>
-                        <select
-                          value={relStatus}
-                          onChange={(e) => setRelStatus(e.target.value as any)}
-                          className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="ACTIVE">ACTIVE (Active Routing)</option>
-                          <option value="INACTIVE">INACTIVE (Do Not Route)</option>
-                        </select>
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={isActionLoading}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all pt-2.5"
-                      >
-                        {isActionLoading ? 'Saving...' : 'Save Mapping Relationship'}
-                      </button>
-                    </form>
-                  </div>
+                  
 
                   {/* Relationships List Table */}
                   <div className="lg:col-span-2 space-y-3">
