@@ -147,6 +147,23 @@ export const LineSetupModal: React.FC<LineSetupModalProps> = ({
                     />
                   </div>
                 </div>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">
+                    Assigned Operator(s)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Yusuf Halide, Didi Oktora"
+                    value={(line.assignedOperatorNames || []).join(', ')}
+                    onChange={(e) => {
+                      const names = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                      handleFieldChange(line.id, 'assignedOperatorNames', names);
+                    }}
+                    className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Separate multiple operators with commas</p>
+                </div>
               </div>
             ))}
           </div>

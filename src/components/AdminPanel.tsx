@@ -26,6 +26,8 @@ import {
   Check,
   X,
   AlertCircle,
+  FileEdit,
+  ShieldAlert,
 } from 'lucide-react';
 
 import { AssemblerMasterTab } from './admin/AssemblerMasterTab';
@@ -33,6 +35,8 @@ import { ProductMasterTab } from './admin/ProductMasterTab';
 import { ChecksheetMasterTab } from './admin/ChecksheetMasterTab';
 import { UserMasterTab } from './admin/UserMasterTab';
 import { DatabaseSyncTest } from './DatabaseSyncTest';
+import { ChangeTemplateModal } from './admin/ChangeTemplateModal';
+import { TemplateCleanupModal } from './admin/TemplateCleanupModal';
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 
@@ -100,6 +104,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Template Relationship change modal state & Template cleanup audit modal state
+  const [selectedRelationshipForChange, setSelectedRelationshipForChange] = useState<TemplateRelationship | null>(null);
+  const [showCleanupModal, setShowCleanupModal] = useState<boolean>(false);
 
   // Form State for Template Relationship
   const [relProductId, setRelProductId] = useState('');
@@ -381,6 +389,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
     });
   }, [templateRelationships, relSearch]);
+
+  const activeRelationshipsByProduct = useMemo(() => {
+    const counts: Record<string, number> = {};
+    templateRelationships.forEach((r) => {
+      if (r.status === 'ACTIVE') {
+        counts[r.productId] = (counts[r.productId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [templateRelationships]);
+
+  const duplicateProductsCount = useMemo(() => {
+    return Object.values(activeRelationshipsByProduct).filter((c) => c > 1).length;
+  }, [activeRelationshipsByProduct]);
 
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((l) => {
@@ -1058,10 +1080,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <h3 className="text-sm font-black text-slate-900">Checksheet Template Relationships</h3>
                     <p className="text-xs text-slate-500">Explicitly link Product Masters to exact testing templates for Dynotest and Testbench, avoiding silent fallbacks.</p>
                   </div>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded-md">
-                    {templateRelationships.length} Mappings Active
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCleanupModal(true)}
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5 shadow-3xs"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>Template Cleanup Audit</span>
+                    </button>
+                    <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2.5 py-1.5 rounded-xl">
+                      {templateRelationships.length} Total Mappings
+                    </span>
+                  </div>
                 </div>
+
+                {/* Duplicate Relationship Critical Warning */}
+                {duplicateProductsCount > 0 && (
+                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start space-x-3">
+                    <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-rose-900 space-y-1">
+                      <div className="font-bold text-rose-800 text-[11px] uppercase tracking-wider">
+                        Action Required: {duplicateProductsCount} Product(s) Have Duplicate Relationships
+                      </div>
+                      <p>
+                        When more than one active relationship exists for a single Product ID, automatic template selection is blocked to prevent accidental mismatch. Click <strong>Change Template</strong> on any duplicate row to assign the single authoritative checksheet template.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Missing Links Scanner Section */}
                 <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-3">
@@ -1153,44 +1200,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </td>
                             </tr>
                           ) : (
-                             filteredRelationships.map((rel) => (
-                              <tr key={rel.relationshipId} className="hover:bg-slate-50/50">
-                                <td className="px-4 py-3">
-                                  <div className="font-bold text-slate-900">{rel.componentName}</div>
-                                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">{rel.unitModel}</div>
-                                </td>
-                                <td className="px-4 py-3 font-semibold text-slate-700">
-                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
-                                    rel.finalProcess.toUpperCase() === 'DYNOTEST' ? 'bg-orange-50 text-orange-700' : 'bg-cyan-50 text-cyan-700'
-                                  }`}>
-                                    {rel.finalProcess}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 font-medium text-slate-800">
-                                  {rel.templateName}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleRelationshipStatus(rel)}
-                                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                      rel.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' : 'bg-slate-100 text-slate-600 border border-slate-200'
-                                    }`}
-                                  >
-                                    {rel.status}
-                                  </button>
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteRelationship(rel.relationshipId)}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))
+                             filteredRelationships.map((rel) => {
+                              const isDuplicateForProduct = (activeRelationshipsByProduct[rel.productId] || 0) > 1;
+
+                              return (
+                                <tr key={rel.relationshipId} className={`hover:bg-slate-50/50 ${isDuplicateForProduct ? 'bg-rose-50/30' : ''}`}>
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center flex-wrap gap-1">
+                                      <span className="font-bold text-slate-900">{rel.componentName}</span>
+                                      {isDuplicateForProduct && (
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-300">
+                                          DUPLICATE RELATIONSHIP
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                      {rel.unitModel} <span className="text-slate-400 font-normal">({rel.productId})</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 font-semibold text-slate-700">
+                                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
+                                      rel.finalProcess.toUpperCase() === 'DYNOTEST' ? 'bg-orange-50 text-orange-700' : 'bg-cyan-50 text-cyan-700'
+                                    }`}>
+                                      {rel.finalProcess}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 font-medium text-slate-800">
+                                    <div>{rel.templateName}</div>
+                                    <div className="font-mono text-[10px] text-slate-400">{rel.templateId}</div>
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleRelationshipStatus(rel)}
+                                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                        rel.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                      }`}
+                                    >
+                                      {rel.status}
+                                    </button>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedRelationshipForChange(rel)}
+                                      className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 text-xs font-bold transition-all shadow-3xs"
+                                      title="Change Checksheet Template"
+                                    >
+                                      <FileEdit className="w-3.5 h-3.5" />
+                                      <span>Change Template</span>
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
@@ -1229,6 +1292,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <DatabaseSyncTest currentUser={currentUser} />
             )}
           </div>
+        )}
+
+        {/* Change Template Modal */}
+        {selectedRelationshipForChange && (
+          <ChangeTemplateModal
+            relationship={selectedRelationshipForChange}
+            templates={templates}
+            productModels={productModels}
+            allRelationships={templateRelationships}
+            currentUser={currentUser}
+            onClose={() => setSelectedRelationshipForChange(null)}
+            onSuccess={(msg) => {
+              showTemporarySuccess(msg);
+              loadConfigData();
+            }}
+          />
+        )}
+
+        {/* Template Cleanup & Dry-Run Modal */}
+        {showCleanupModal && (
+          <TemplateCleanupModal
+            currentUser={currentUser}
+            onClose={() => setShowCleanupModal(false)}
+            onCleanupComplete={(msg) => {
+              showTemporarySuccess(msg);
+              loadConfigData();
+            }}
+          />
         )}
       </div>
     </div>

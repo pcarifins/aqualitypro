@@ -29,8 +29,8 @@ if (INITIAL_TEMPLATE_RELATIONSHIPS.length !== 169) {
 const templates = getFifteenTemplates(initialProductModels);
 console.log(`\n3. Total Templates in Registry: ${templates.length}`);
 const gltTemplates = templates.filter(t => t.testStage === 'GLT');
-const finalTemplates = templates.filter(t => t.testStage !== 'GLT' && t.id !== 'tmpl-contingency-performance-only');
-const contingencyTemplates = templates.filter(t => t.id === 'tmpl-contingency-performance-only');
+const contingencyTemplates = templates.filter(t => t.id === 'tmpl-torque-converter-performance-v1' || t.id === 'tmpl-contingency-performance-only' || t.id === 'tmpl-controlled-performance-only');
+const finalTemplates = templates.filter(t => t.testStage !== 'GLT' && !contingencyTemplates.some(ct => ct.id === t.id));
 
 console.log(`  - Universal GLT Templates: ${gltTemplates.length} (Expected: 2)`);
 console.log(`  - Shared Final-Test Templates: ${finalTemplates.length} (Expected: 15)`);

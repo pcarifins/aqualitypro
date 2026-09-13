@@ -32,11 +32,14 @@ import {
   Save,
   X,
   AlertCircle,
+  AlertTriangle,
   Sliders,
   HelpCircle,
   Eye,
   ShieldCheck,
-   } from 'lucide-react';
+  ShieldAlert,
+  FileText,
+} from 'lucide-react';
 
 interface ChecksheetMasterTabProps {
   templates: ChecksheetTemplate[];
@@ -79,8 +82,63 @@ const [showAssignModal, setShowAssignModal] = useState(false);
 const [assignTemplateId, setAssignTemplateId] = useState('');
 const [assignUnitModel, setAssignUnitModel] = useState('');
 const [assignComponent, setAssignComponent] = useState('');
-const [assignError, setAssignError] = useState(null);
-const [assignSuccess, setAssignSuccess] = useState(null);
+const [assignError, setAssignError] = useState<string | null>(null);
+const [assignSuccess, setAssignSuccess] = useState<string | null>(null);
+
+// Dedicated Delete Modal State with Reference Checking
+const [showDeleteModal, setShowDeleteModal] = useState(false);
+const [deleteTargetTemplate, setDeleteTargetTemplate] = useState<ChecksheetTemplate | null>(null);
+const [deleteConfirmText, setDeleteConfirmText] = useState('');
+const [deleteReason, setDeleteReason] = useState('');
+const [deleteError, setDeleteError] = useState<string | null>(null);
+const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleAssignSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignTemplateId || !assignUnitModel || !assignComponent) return;
+    try {
+      const matchProd = productModels?.find(
+        (m) =>
+          m.unitModel.trim().toUpperCase() === assignUnitModel.trim().toUpperCase() &&
+          (m.component || m.compName || '').trim().toUpperCase() === assignComponent.trim().toUpperCase()
+      );
+      if (!matchProd) {
+        setAssignError('Matching Product Model / Component not found in Product Master.');
+        return;
+      }
+      const productId = matchProd.id || `${matchProd.unitModel}-${matchProd.component}`;
+      const process = matchProd.compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH';
+
+      const rel: FinalTestTemplateRelationship = {
+        relationshipId: `rel-${Date.now()}`,
+        productId,
+        compGroup: matchProd.compGroup,
+        component: matchProd.component || (matchProd as any).compName,
+        componentName: matchProd.component || (matchProd as any).compName || 'Component',
+        unitModel: matchProd.unitModel,
+        productGroup: matchProd.compGroup,
+        finalProcess: process as any,
+        templateId: assignTemplateId,
+        standardProfileId: (matchProd as any).standardProfileId || 'std-default',
+        compatibleLineIds: matchProd.compGroup === 'Engine' ? ['dyno-1', 'dyno-2', 'dyno-3'] : ['tb-1', 'tb-2', 'tb-3'],
+        relationshipMode: 'STANDARD',
+        status: 'ACTIVE',
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+
+      await store.saveTemplateRelationship(rel);
+      setAssignSuccess('Template successfully assigned to Product ID!');
+      setTimeout(() => {
+        setShowAssignModal(false);
+        setAssignSuccess(null);
+      }, 1200);
+    } catch (err: any) {
+      setAssignError(err.message || 'Failed to assign template');
+    }
+  };
 
 
   // Section Modal
@@ -230,15 +288,60 @@ const [assignSuccess, setAssignSuccess] = useState(null);
     }
   };
 
-  const handleDelete = async (tmplId: string) => {
-    if (confirm('Are you sure you want to delete this checksheet template?')) {
-      await onDeleteTemplate(tmplId);
-      const remaining = templates.filter((t) => t.id !== tmplId);
-      if (remaining.length > 0) {
-        setSelectedTemplateId(remaining[0].id);
-      } else {
-        setSelectedTemplateId(null);
+  const handleOpenDeleteModal = (target: ChecksheetTemplate) => {
+    setDeleteTargetTemplate(target);
+    setDeleteConfirmText('');
+    setDeleteReason('');
+    setDeleteError(null);
+    setDeleteSuccess(null);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteTargetTemplate) return;
+
+    if (deleteConfirmText.trim() !== 'DELETE') {
+      setDeleteError('Please type "DELETE" exactly to confirm permanent deletion.');
+      return;
+    }
+
+    if (!deleteReason.trim()) {
+      setDeleteError('Reason for deletion is required for quality audit compliance.');
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const tmplId = deleteTargetTemplate.id;
+      const res = await store.deleteChecksheetTemplate(
+        tmplId,
+        'Admin Quality',
+        deleteReason.trim()
+      );
+
+      if (res.success) {
+        setDeleteSuccess(res.message);
+        await onDeleteTemplate(tmplId);
+        const remaining = templates.filter((t) => t.id !== tmplId);
+        if (remaining.length > 0) {
+          setSelectedTemplateId(remaining[0].id);
+        } else {
+          setSelectedTemplateId(null);
+        }
+
+        setTimeout(() => {
+          setShowDeleteModal(false);
+          setDeleteTargetTemplate(null);
+          setDeleteSuccess(null);
+        }, 1200);
       }
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete checksheet template.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -660,21 +763,30 @@ const [assignSuccess, setAssignSuccess] = useState(null);
                   </button>
 
                   <button
-    type="button"
-    onClick={(e) => {
-      e.stopPropagation();
-      setAssignTemplateId(workingTemplate.id);
-      setAssignUnitModel('');
-      setAssignComponent('');
-      setAssignError(null);
-      setAssignSuccess(null);
-      setShowAssignModal(true);
-    }}
-    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-    title="Assign Template to Model"
-  >
-    <FileText className="w-4 h-4" />
-  </button>
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAssignTemplateId(workingTemplate.id);
+                      setAssignUnitModel('');
+                      setAssignComponent('');
+                      setAssignError(null);
+                      setAssignSuccess(null);
+                      setShowAssignModal(true);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                    title="Assign Template to Model"
+                  >
+                    <FileText className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDeleteModal(workingTemplate)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    title="Permanently Delete Template"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 
@@ -1581,6 +1693,189 @@ const [assignSuccess, setAssignSuccess] = useState(null);
           </div>
         </div>
       )}
+
+      {/* DEDICATED DELETE TEMPLATE MODAL WITH REFERENCE SAFEGUARDS */}
+      {showDeleteModal && deleteTargetTemplate && (() => {
+        const refSummary = store.getTemplateReferenceSummary(deleteTargetTemplate.id);
+        const canDelete = refSummary.canDelete;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 flex flex-col space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    canDelete ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {canDelete ? <Trash2 className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">
+                      {canDelete ? 'Permanently Delete Checksheet Template' : 'Template Deletion Blocked'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      Reference & QA audit safety validation
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Target Info */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800">{deleteTargetTemplate.name}</span>
+                  <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                    {deleteTargetTemplate.id}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {deleteTargetTemplate.compGroup} • {deleteTargetTemplate.testStage} Stage • Rev {deleteTargetTemplate.revision} ({deleteTargetTemplate.status})
+                </div>
+              </div>
+
+              {/* Reference Counts Grid */}
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className={`p-2.5 rounded-xl border ${
+                  refSummary.activeRelationshipCount > 0 ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block text-slate-500">Active Mappings</span>
+                  <span className="text-base font-black mt-0.5 block">{refSummary.activeRelationshipCount}</span>
+                </div>
+                <div className={`p-2.5 rounded-xl border ${
+                  refSummary.completedTestRefCount > 0 ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block text-slate-500">Completed Tests</span>
+                  <span className="text-base font-black mt-0.5 block">{refSummary.completedTestRefCount}</span>
+                </div>
+                <div className={`p-2.5 rounded-xl border ${
+                  refSummary.certificateRefCount > 0 ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block text-slate-500">Certificates</span>
+                  <span className="text-base font-black mt-0.5 block">{refSummary.certificateRefCount}</span>
+                </div>
+              </div>
+
+              {/* BLOCKED STATE */}
+              {!canDelete ? (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1.5">
+                    <div className="font-bold flex items-center space-x-1 text-amber-800">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Deletion Safeguard Triggered</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed">
+                      {refSummary.blockReason}
+                    </p>
+                  </div>
+
+                  {refSummary.activeRelationshipDetails.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">
+                        Currently Mapped Products ({refSummary.activeRelationshipDetails.length}):
+                      </span>
+                      <div className="max-h-28 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-2 text-[11px] space-y-1">
+                        {refSummary.activeRelationshipDetails.map((prod, idx) => (
+                          <div key={idx} className="font-mono text-slate-700 truncate">
+                            • {prod}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Tip: To delete this template, first reassign these products to another template using <strong>Change Template</strong>.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteModal(false)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      Close Safeguard
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ALLOWED DELETE STATE */
+                <form onSubmit={handleConfirmDelete} className="space-y-3">
+                  {deleteError && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold flex items-center space-x-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{deleteError}</span>
+                    </div>
+                  )}
+                  {deleteSuccess && (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-bold flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{deleteSuccess}</span>
+                    </div>
+                  )}
+
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 font-medium">
+                    ✓ Verified: 0 active product mappings, 0 historical test records, and 0 certificates. This template can be safely deleted.
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Reason for Permanent Deletion <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={deleteReason}
+                      onChange={(e) => setDeleteReason(e.target.value)}
+                      placeholder="e.g. Unused legacy test draft replaced by standardized shared template"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 font-medium placeholder-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Type <span className="text-rose-600 font-mono font-black">DELETE</span> to confirm <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder="Type DELETE here"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-rose-600 font-mono font-bold uppercase placeholder-slate-400"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex justify-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteModal(false)}
+                      disabled={isDeleting}
+                      className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isDeleting || deleteConfirmText.trim() !== 'DELETE' || !deleteReason.trim()}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-40 transition-colors flex items-center space-x-1.5 shadow-sm"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isDeleting ? 'Deleting...' : 'Permanently Delete Template'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

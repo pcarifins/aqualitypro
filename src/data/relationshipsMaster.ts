@@ -1311,13 +1311,16 @@ export function resolveTemplateIdAndLinesForProduct(p: ProductDefinition): {
   }
 };
   
-  if (mappings[productId]) {
+  const generatedKey = (p.compGroup + '-' + p.unitModel + '-' + p.component).replace(/[^a-zA-Z0-9-]/g, '-').toUpperCase();
+  const match = mappings[productId] || mappings[generatedKey];
+  
+  if (match) {
     return {
-      templateId: mappings[productId].templateId,
-      templateName: mappings[productId].templateName,
-      compatibleLineIds: mappings[productId].compatibleLineIds,
-      relationshipMode: mappings[productId].templateId === 'tmpl-controlled-performance-only' || mappings[productId].templateId === 'tmpl-torque-converter-performance-v1' ? 'PERFORMANCE_ONLY' : 'STANDARD',
-      configurationStatus: mappings[productId].templateId === 'tmpl-controlled-performance-only' || mappings[productId].templateId === 'tmpl-torque-converter-performance-v1' ? 'TEMPORARY_APPROVED' : 'APPROVED',
+      templateId: match.templateId,
+      templateName: match.templateName,
+      compatibleLineIds: match.compatibleLineIds,
+      relationshipMode: match.templateId === 'tmpl-controlled-performance-only' || match.templateId === 'tmpl-torque-converter-performance-v1' ? 'PERFORMANCE_ONLY' : 'STANDARD',
+      configurationStatus: match.templateId === 'tmpl-controlled-performance-only' || match.templateId === 'tmpl-torque-converter-performance-v1' ? 'TEMPORARY_APPROVED' : 'APPROVED',
     };
   }
   

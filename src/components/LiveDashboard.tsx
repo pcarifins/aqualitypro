@@ -43,51 +43,15 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  const overallCapacityStats = useMemo(
-    () => calculateOverallCapacity(queueRecords, testingLines),
-    [queueRecords, testingLines]
-  );
+  const orderedLines = useMemo(() => {
+    const row1Ids = ['glt-engine', 'dyno-1', 'dyno-2', 'dyno-3', 'tb-4-cyl'];
+    const row2Ids = ['glt-pt-ppm', 'tb-1', 'tb-2', 'tb-3', 'mobile-tb'];
+    const allIds = [...row1Ids, ...row2Ids];
 
-  const engineLines = useMemo(
-    () => testingLines.filter((l) => l.componentGroup === 'Engine'),
-    [testingLines]
-  );
-
-  const ptCylLines = useMemo(
-    () => testingLines.filter((l) => l.componentGroup !== 'Engine' && l.id !== 'glt-pt-ppm'),
-    [testingLines]
-  );
-
-  // Format Elapsed Time (from start Iso string to now)
-  const calculateElapsedString = (startIso?: string) => {
-    if (!startIso) return '00:00:00';
-    const start = new Date(startIso).getTime();
-    if (isNaN(start)) return '00:00:00';
-
-    const diffMs = Math.max(0, currentTime.getTime() - start);
-    const totalSecs = Math.floor(diffMs / 1000);
-    const hrs = Math.floor(totalSecs / 3600);
-    const mins = Math.floor((totalSecs % 3600) / 60);
-    const secs = totalSecs % 60;
-
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
-  };
-
-  const calculateElapsedMinutes = (startIso?: string) => {
-    if (!startIso) return 0;
-    const start = new Date(startIso).getTime();
-    if (isNaN(start)) return 0;
-    return Math.max(0, (currentTime.getTime() - start) / 60000);
-  };
-
-  const calculateEstFinishStr = (startIso: string, stdMinutes: number) => {
-    const start = new Date(startIso).getTime();
-    if (isNaN(start)) return '--:--';
-    const finish = new Date(start + stdMinutes * 60 * 1000);
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    return `${pad(finish.getHours())}:${pad(finish.getMinutes())}:${pad(finish.getSeconds())}`;
-  };
+    return allIds
+      .map((id) => testingLines.find((l) => l.id === id))
+      .filter((l): l is TestingLine => Boolean(l));
+  }, [testingLines]);
 
   const renderStationCard = (line: TestingLine) => {
     // 1. Find running JO for this station
@@ -96,229 +60,98 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       return (q.currentTestingLineId || q.testingLineId) === line.id;
     });
 
-    // 2. Find next queued JOs (sorted by priority)
-    const nextJOs = queueRecords
-      .filter((q) => {
-        if (q.status !== 'WAITING') return false;
-        return (q.currentTestingLineId || q.testingLineId) === line.id;
-      })
-      .sort((a, b) => a.currentPriority - b.currentPriority);
+    // 2. Find next waiting JOs
+    const nextJOs = queueRecords.filter((q) => {
+      if (q.status !== 'WAITING') return false;
+      return (q.currentTestingLineId || q.testingLineId || q.priorityLineId) === line.id;
+    });
 
-    const nextJO = nextJOs[0];
-    const next2JO = nextJOs[1];
-
-    // 3. Determine operational status
-    const startTimeIso = runningJO?.gltReceivingTime || runningJO?.receivingTime || runningJO?.createdAt;
-    const elapsedMins = calculateElapsedMinutes(startTimeIso);
-    const stdMins = line.standardDurationMinutes || 60;
-    const isDelayed = runningJO && elapsedMins > stdMins;
-
-    let opStatus: 'IDLE' | 'WAITING' | 'RUNNING' | 'DELAYED' = 'IDLE';
+    // 3. Determine operational status: RUNNING / WAITING / IDLE / OFF
+    let opStatus: 'RUNNING' | 'WAITING' | 'IDLE' | 'OFF' = 'IDLE';
     if (runningJO) {
-      opStatus = isDelayed ? 'DELAYED' : 'RUNNING';
+      opStatus = 'RUNNING';
+    } else if (line.active === false) {
+      opStatus = 'OFF';
     } else if (nextJOs.length > 0) {
       opStatus = 'WAITING';
     }
 
-    // Line capacity summary for this station
-    const lineSummary = overallCapacityStats.lineSummaries.find((s) => s.lineId === line.id);
-    const utilPercent = lineSummary ? lineSummary.utilizationPercent : 0;
-    const isOverloaded = utilPercent > 100;
-    const isHigh = utilPercent >= 85 && !isOverloaded;
-
     return (
       <div
         key={line.id}
-        className={`rounded-2xl border p-4 transition-all shadow-xs flex flex-col justify-between ${
+        className={`rounded-xl border p-3 flex flex-col justify-between h-40 transition-all shadow-xs ${
           isTvMode
-            ? opStatus === 'DELAYED'
-              ? 'bg-rose-950/60 border-rose-800 text-slate-100'
-              : opStatus === 'RUNNING'
-              ? 'bg-amber-950/60 border-amber-700 text-slate-100'
-              : 'bg-slate-900 border-slate-800 text-slate-200'
-            : opStatus === 'DELAYED'
-            ? 'bg-rose-50/70 border-rose-300 text-slate-900'
-            : opStatus === 'RUNNING'
-            ? 'bg-amber-50/50 border-amber-300 text-slate-900'
+            ? 'bg-slate-900 border-slate-800 text-slate-100'
             : 'bg-white border-slate-200 text-slate-900'
         }`}
       >
-        <div>
-          {/* Card Top Header: Station Name & Operational Status */}
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200/50 mb-2.5">
-            <div className="flex items-center space-x-2">
-              <span
-                className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
-                  line.process === 'GLT'
-                    ? 'bg-blue-100 text-blue-800'
-                    : line.process === 'Dynotest'
-                    ? 'bg-purple-100 text-purple-800'
-                    : 'bg-cyan-100 text-cyan-800'
-                }`}
-              >
-                {line.process}
-              </span>
-              <h4 className="text-sm font-black tracking-tight">{line.name}</h4>
-            </div>
-
+        {/* Header: Process badge, Line name, Line status */}
+        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-800">
+          <div className="flex items-center space-x-1.5 min-w-0">
             <span
-              className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg border ${
-                opStatus === 'RUNNING'
-                  ? 'bg-amber-500 text-white border-amber-600 animate-pulse'
-                  : opStatus === 'DELAYED'
-                  ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
-                  : opStatus === 'WAITING'
-                  ? 'bg-blue-100 text-blue-800 border-blue-200'
-                  : 'bg-slate-100 text-slate-500 border-slate-200'
+              className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                line.process === 'GLT'
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                  : line.process === 'Dynotest'
+                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                  : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300'
               }`}
             >
-              {opStatus}
+              {line.process}
             </span>
+            <h4 className="text-xs font-black tracking-tight truncate">{line.name}</h4>
           </div>
 
-          {/* Line Capacity Status Bar with Red/Green/Amber Indicator */}
-          <div
-            className={`p-2 rounded-xl mb-3 border ${
-              isTvMode
-                ? 'bg-slate-800/80 border-slate-700'
-                : 'bg-slate-50/90 border-slate-200/70'
+          <span
+            className={`text-[9px] font-black uppercase px-2 py-0.5 rounded shrink-0 ${
+              opStatus === 'RUNNING'
+                ? 'bg-emerald-600 text-white animate-pulse'
+                : opStatus === 'WAITING'
+                ? 'bg-amber-500 text-white'
+                : opStatus === 'OFF'
+                ? 'bg-rose-600 text-white'
+                : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
             }`}
           >
-            <div className="flex items-center justify-between text-[11px] font-bold mb-1">
-              <span className={`flex items-center space-x-1 ${isTvMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                <Gauge className="w-3 h-3 text-blue-500" />
-                <span>Line Capacity:</span>
-              </span>
-              <span
-                className={`font-mono font-black ${
-                  isOverloaded
-                    ? 'text-rose-500'
-                    : isHigh
-                    ? 'text-amber-500'
-                    : 'text-emerald-600'
-                }`}
-              >
-                {utilPercent.toFixed(0)}%
-              </span>
-            </div>
+            {opStatus}
+          </span>
+        </div>
 
-            {/* Red / Green Progress Bar */}
-            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  isOverloaded
-                    ? 'bg-rose-500'
-                    : isHigh
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(4, utilPercent))}%` }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] mt-1 text-slate-400 font-mono">
-              <span>Planned: <strong>{lineSummary ? lineSummary.plannedHours.toFixed(1) : 0}h</strong></span>
-              <span>Available: <strong>{lineSummary ? lineSummary.availableHours.toFixed(1) : 0}h</strong></span>
-            </div>
-          </div>
-
-          {/* Current Running JO Section */}
+        {/* Card Body */}
+        <div className="flex-1 flex flex-col justify-center py-2">
           {runningJO ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Current Test JO
-                  </span>
-                  <div
-                    onClick={() => onSelectJO && onSelectJO(runningJO.joRoNumber)}
-                    className="text-base font-black font-mono text-blue-600 hover:underline cursor-pointer"
-                  >
-                    {runningJO.joRoNumber}
-                  </div>
-                </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-1">
                 <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  onClick={() => onSelectJO && onSelectJO(runningJO.joRoNumber)}
+                  className="text-xs font-black font-mono text-blue-600 dark:text-blue-400 hover:underline cursor-pointer truncate"
+                  title={runningJO.joRoNumber}
+                >
+                  {runningJO.joRoNumber}
+                </span>
+                <span
+                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
                     runningJO.testType === 'RETEST'
-                      ? 'bg-indigo-100 text-indigo-800'
-                      : 'bg-emerald-100 text-emerald-800'
+                      ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                   }`}
                 >
-                  {runningJO.testType}
+                  {runningJO.testType || 'PROD'}
                 </span>
               </div>
 
-              <div className="text-xs font-bold truncate">
-                {runningJO.unitModel} — {runningJO.component}
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate" title={runningJO.unitModel}>
+                {runningJO.unitModel}
               </div>
 
-              {runningJO.assemblyMechanic && (
-                <div className="text-[11px] text-slate-500 flex items-center space-x-1">
-                  <UserIcon className="w-3 h-3 text-slate-400" />
-                  <span className="truncate">{runningJO.assemblyMechanic}</span>
-                </div>
-              )}
-
-              {/* Timing Box */}
-              <div className="p-2.5 rounded-xl bg-slate-100/80 border border-slate-200/80 space-y-1.5 font-mono text-xs mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase">Elapsed:</span>
-                  <span className="font-black text-amber-600 text-sm">
-                    {calculateElapsedString(startTimeIso)}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-200/60">
-                  <span>Std: <strong>{stdMins}m</strong></span>
-                  <span>Est Finish: <strong>{calculateEstFinishStr(startTimeIso || '', stdMins)}</strong></span>
-                </div>
-
-                {/* Timing Status Badge */}
-                <div className="pt-1 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400">Timing Status:</span>
-                  {isDelayed ? (
-                    <span className="text-[10px] font-black text-rose-600 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded">
-                      DELAYED +{Math.round(elapsedMins - stdMins)} MIN
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded">
-                      ON TIME
-                    </span>
-                  )}
-                </div>
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate" title={runningJO.component}>
+                {runningJO.component}
               </div>
             </div>
           ) : (
-            <div className="py-6 text-center text-slate-400 text-xs italic bg-slate-50/50 rounded-xl border border-dashed border-slate-200 my-2">
-              No test job currently running on this line
+            <div className="text-center text-slate-400 dark:text-slate-500 text-xs italic">
+              No test currently running
             </div>
-          )}
-        </div>
-
-        {/* Next Queued Jobs Footer */}
-        <div className="pt-3 border-t border-slate-200/50 mt-3 text-[11px]">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
-            <span>Next in Queue</span>
-            {nextJOs.length > 0 && (
-              <span className="font-mono text-blue-600">{nextJOs.length} waiting</span>
-            )}
-          </div>
-
-          {nextJO ? (
-            <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-200/60 space-y-0.5">
-              <div className="flex items-center justify-between font-bold text-slate-800">
-                <span className="font-mono text-blue-700">#{nextJO.currentPriority} {nextJO.joRoNumber}</span>
-                <span className="text-[9px] bg-slate-200 px-1.5 py-0.2 rounded">{nextJO.unitModel}</span>
-              </div>
-              <div className="text-[10px] text-slate-500 truncate">{nextJO.component}</div>
-              {next2JO && (
-                <div className="text-[9px] text-slate-400 truncate pt-0.5 border-t border-slate-200/40">
-                  Followed by: #{next2JO.currentPriority} {next2JO.joRoNumber}
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="text-slate-400 italic text-[10px]">Queue empty</span>
           )}
         </div>
       </div>
@@ -327,7 +160,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   return (
     <div
-      className={`min-h-screen p-3 sm:p-5 transition-colors space-y-5 ${
+      className={`min-h-screen p-3 sm:p-5 transition-colors space-y-4 ${
         isTvMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
       }`}
     >
@@ -344,7 +177,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
           <h2 className="text-xl font-black tracking-tight uppercase">LIVE TESTING MONITORING</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Operational Station Workload, Timer Tracking & Embedded Timeline
+            Operational Station Workload, Line Status & Embedded Timeline
           </p>
         </div>
 
@@ -370,45 +203,14 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
       </div>
 
-      {/* 1. ENGINE TESTING MONITORING SECTION (Exactly 4 cards) */}
-      <div className="space-y-3">
-        <div className="flex items-center space-x-2">
-          <div className="p-1.5 bg-blue-100 text-blue-700 rounded-xl">
-            <Layers className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-xs font-black uppercase tracking-wider">ENGINE TESTING (4 STATIONS)</h3>
-            <p className="text-[11px] text-slate-500">Live Engine GLT and Dynotest station status</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {engineLines.map(renderStationCard)}
+      {/* 10 TESTING CARDS IN 2 ROWS OF 5 (Desktop Grid) */}
+      <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {orderedLines.map(renderStationCard)}
         </div>
       </div>
 
-      {/* 2. PT / CYLINDER TESTING MONITORING SECTION (Exactly 6 cards) */}
-      <div className="space-y-3">
-        <div className="flex items-center space-x-2">
-          <div className="p-1.5 bg-cyan-100 text-cyan-700 rounded-xl">
-            <Layers className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-xs font-black uppercase tracking-wider">
-              POWER TRAIN & CYLINDER TESTING (5 STATIONS)
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Live Power Train, Cylinder, GLT, and Testbench station status
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {ptCylLines.map(renderStationCard)}
-        </div>
-      </div>
-
-      {/* 3. EMBEDDED TIMELINE SCHEDULE */}
+      {/* EMBEDDED TIMELINE SCHEDULE */}
       <div className="pt-2">
         <EmbeddedTimeline
           queueRecords={queueRecords}

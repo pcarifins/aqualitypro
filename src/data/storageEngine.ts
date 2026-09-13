@@ -39,7 +39,7 @@ import {
   initialStandardProfiles,
 } from './initialData';
 
-import { INITIAL_REQUIRED_PRODUCT_MODELS } from './productMasterSeed';
+import { INITIAL_REQUIRED_PRODUCT_MODELS, getProductModelId } from './productMasterSeed';
 import { initialQueueRecords } from './initialQueueData';
 import { initialTestingLines } from './initialTestingLines';
 import { computeUnifiedAnalytics } from '../services/analyticsService';
@@ -55,6 +55,16 @@ import {
   sanitizeFirestoreValue,
   testFirestoreConnection,
 } from '../lib/firestoreSync';
+
+import {
+  TemplateCleanupService,
+  DryRunReport,
+  TemplateBackupSnapshot,
+  isStarterOrFallbackTemplate,
+  TARGET_LEGACY_TEMPLATE_IDS,
+  APPROVED_SHARED_TEMPLATE_IDS,
+  PROTECTED_CONTINGENCY_TEMPLATE_IDS,
+} from '../services/templateCleanupService';
 
 const STORAGE_KEYS = {
   USERS: 'aquality_users_v2',
@@ -87,7 +97,7 @@ const setStorage = (key: string, val: string): void => {
   }
 };
 
-class DataStore {
+export class DataStore {
   private users: User[] = [];
   private assemblers: Assembler[] = [];
   private models: ProductModel[] = [];
@@ -682,12 +692,9 @@ class DataStore {
     purgedStarterCount: number;
   } {
     const prevCount = this.templates.length;
-    // Purge all starter/trial templates completely
+    // Purge all starter/trial/fallback templates completely
     this.templates = this.templates.filter(
-      (tmpl) =>
-        !tmpl.id.startsWith('tmpl-starter-') &&
-        !tmpl.name.toLowerCase().includes('starter checksheet') &&
-        !tmpl.name.toLowerCase().includes('trial checksheet')
+      (tmpl) => !isStarterOrFallbackTemplate(tmpl.id, tmpl.name)
     );
 
     // Ensure all 18 production templates exist and are ACTIVE
@@ -711,7 +718,7 @@ class DataStore {
     alreadyExistingCount: number;
   } {
     const res = this.ensureProductionTemplates();
-    return { createdCount: res.activeTemplateCount, alreadyExistingCount: res.activeTemplateCount };
+    return { createdCount: 0, alreadyExistingCount: res.activeTemplateCount };
   }
 
   public bulkActivateStarterTemplates(): number {
@@ -799,6 +806,11 @@ class DataStore {
   }
 
   public async saveChecksheetTemplate(template: ChecksheetTemplate, actorName = 'Admin'): Promise<void> {
+    if (isStarterOrFallbackTemplate(template.id, template.name)) {
+      console.warn(`[storageEngine] Blocked attempt to create or save starter/fallback template: ${template.id}`);
+      return;
+    }
+
     if (!template.productMasterId && template.component && template.unitModel) {
       const matched = findMatchingProduct(this.models, template.component, template.unitModel);
       if (matched) {
@@ -915,22 +927,161 @@ class DataStore {
     return newTemplate;
   }
 
-  public async deleteChecksheetTemplate(templateId: string, actorName = 'Admin'): Promise<void> {
+  public getTemplateReferenceSummary(templateId: string): {
+    templateId: string;
+    templateName: string;
+    compGroup?: string;
+    testStage?: string;
+    revision?: number;
+    status?: string;
+    activeRelationshipCount: number;
+    activeRelationshipDetails: string[];
+    completedTestRefCount: number;
+    certificateRefCount: number;
+    isProtected: boolean;
+    canDelete: boolean;
+    blockReason?: string;
+  } {
     const target = this.templates.find((t) => t.id === templateId);
-    this.templates = this.templates.filter((t) => t.id !== templateId);
-    this.saveToStorageCache();
+    const templateName = target?.name || templateId;
 
-    await removeDocument('checksheetTemplates', templateId);
-    if (target) {
+    // Active relationships
+    const activeRels = this.templateRelationships.filter(
+      (r) => r.status === 'ACTIVE' && r.templateId === templateId
+    );
+    const activeRelationshipCount = activeRels.length;
+    const activeRelationshipDetails = activeRels.map(
+      (r) => `${r.productId} (${r.unitModel} - ${r.componentName || r.component || 'Component'})`
+    );
+
+    // Completed tests
+    let completedTestRefCount = 0;
+    const checkTest = (tId?: string, snapTId?: string) => {
+      if (tId === templateId || snapTId === templateId) {
+        completedTestRefCount++;
+      }
+    };
+    this.dynoRecords.forEach((r: any) => checkTest(r.templateId, r.checksheetSnapshot?.templateId));
+    this.hydraulicRecords.forEach((r: any) => checkTest(r.templateId, r.checksheetSnapshot?.templateId));
+    this.gltRecords.forEach((r: any) => checkTest(r.templateId, r.checksheetSnapshot?.templateId));
+
+    // Certificates & PDF Reports
+    let certificateRefCount = 0;
+    const checkCert = (tId?: string, snapTId?: string) => {
+      if (tId === templateId || snapTId === templateId) {
+        certificateRefCount++;
+      }
+    };
+    this.certificates.forEach((c: any) => checkCert(c.templateId, c.checksheetSnapshot?.templateId));
+    this.pdfReports.forEach((p: any) => checkCert(p.templateId, p.checksheetSnapshot?.templateId));
+
+    // Protected / Fallback check
+    const isProtected =
+      PROTECTED_CONTINGENCY_TEMPLATE_IDS.has(templateId) ||
+      APPROVED_SHARED_TEMPLATE_IDS.has(templateId) ||
+      templateId === 'tmpl-torque-converter-performance-v1' ||
+      target?.isContingency === true;
+
+    let canDelete = true;
+    let blockReason = '';
+
+    if (isProtected) {
+      canDelete = false;
+      blockReason = 'Protected template: Approved shared production or system contingency templates cannot be deleted.';
+    } else if (activeRelationshipCount > 0) {
+      canDelete = false;
+      blockReason = `Cannot delete: Template is currently mapped to ${activeRelationshipCount} active product relationship(s). Reassign products before deleting.`;
+    } else if (completedTestRefCount > 0) {
+      canDelete = false;
+      blockReason = `Cannot delete: Template is referenced by ${completedTestRefCount} historical completed test record(s). Preserving for QA audit integrity.`;
+    } else if (certificateRefCount > 0) {
+      canDelete = false;
+      blockReason = `Cannot delete: Template is referenced by ${certificateRefCount} quality certificate/report(s).`;
+    }
+
+    return {
+      templateId,
+      templateName,
+      compGroup: target?.compGroup,
+      testStage: target?.testStage,
+      revision: target?.revision,
+      status: target?.status,
+      activeRelationshipCount,
+      activeRelationshipDetails,
+      completedTestRefCount,
+      certificateRefCount,
+      isProtected,
+      canDelete,
+      blockReason: blockReason || undefined,
+    };
+  }
+
+  public async deleteChecksheetTemplate(
+    templateId: string,
+    actorName = 'Admin',
+    reason = 'Admin deletion of unreferenced template'
+  ): Promise<{ success: boolean; message: string }> {
+    if (!templateId) {
+      throw new Error('[DELETION BLOCKED] Template ID is required for deletion.');
+    }
+
+    const summary = this.getTemplateReferenceSummary(templateId);
+    if (!summary.canDelete) {
+      throw new Error(`[DELETION BLOCKED] ${summary.blockReason || 'Template cannot be deleted due to active or historical references.'}`);
+    }
+
+    const target = this.templates.find((t) => t.id === templateId);
+    if (!target) {
+      throw new Error(`Template [${templateId}] not found.`);
+    }
+
+    // Atomic delete from Firestore
+    try {
+      const { doc, writeBatch } = await import('firebase/firestore');
+      const { db } = await import('../lib/firebase');
+
+      const batch = writeBatch(db);
+      const tmplDocRef = doc(db, 'checksheetTemplates', templateId);
+      batch.delete(tmplDocRef);
+
+      const auditId = `audit-tmpl-delete-${Date.now()}-${templateId}`;
+      const auditDocRef = doc(db, 'auditLogs', auditId);
+      const auditData = {
+        id: auditId,
+        action: 'DELETE_CHECKSHEET_TEMPLATE',
+        collectionName: 'checksheetTemplates',
+        documentId: templateId,
+        userName: actorName,
+        userRole: 'ADMIN',
+        timestamp: new Date().toISOString(),
+        details: `Permanently deleted checksheet template ${templateId} (${target.name}). Reason: ${reason}. Active refs: 0, Completed test refs: 0, Cert refs: 0.`,
+        previousValue: { id: target.id, name: target.name, compGroup: target.compGroup, revision: target.revision },
+        newValue: { status: 'DELETED', deletedAt: new Date().toISOString(), reason },
+      };
+      batch.set(auditDocRef, sanitizeFirestoreValue(auditData));
+
+      await batch.commit();
+      this.auditLogs.unshift(auditData);
+    } catch (err) {
+      console.warn('[storageEngine] Firestore batch delete failed, falling back to direct removal:', err);
+      await removeDocument('checksheetTemplates', templateId);
       await logAuditEvent({
         action: 'DELETE_CHECKSHEET_TEMPLATE',
         collectionName: 'checksheetTemplates',
         documentId: templateId,
         userName: actorName,
-        details: `Deleted template ${target.name}`,
+        details: `Deleted checksheet template ${target.name}. Reason: ${reason}`,
       });
     }
+
+    this.templates = this.templates.filter((t) => t.id !== templateId);
+    this.saveToStorageCache();
     this.notifyListeners();
+
+    return {
+      success: true,
+      message: `Template [${target.id}] was permanently deleted.`,
+    };
   }
 
   // Flat checksheets
@@ -1581,7 +1732,7 @@ class DataStore {
     if (record.compGroup !== 'Cylinder' && record.gltStatus !== 'GOOD' && record.testType !== 'RETEST') {
       canonicalLineId = record.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-ppm';
     } else {
-      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl' || canonicalLineId === 'glt-pt-ppm') {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-ppm') {
         if (record.compGroup === 'Engine') {
           canonicalLineId = 'dyno-1';
         } else if (record.compGroup === 'Cylinder') {
@@ -1641,7 +1792,7 @@ class DataStore {
         canonicalLineId = gltLine;
       }
     } else {
-      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-cyl' || canonicalLineId === 'glt-pt-ppm') {
+      if (!canonicalLineId || canonicalLineId === 'glt-engine' || canonicalLineId === 'glt-pt-ppm') {
         if (mergedRecord.compGroup === 'Engine') {
           canonicalLineId = 'dyno-1';
         } else if (mergedRecord.compGroup === 'Cylinder') {
@@ -2038,6 +2189,306 @@ class DataStore {
       details: `Deleted standard profile ID: ${id}`,
     });
     this.notifyListeners();
+  }
+
+  // --- TEMPLATE CLEANUP & DRY-RUN AUDIT ---
+  public async createTemplateBackup(actorName = 'Admin'): Promise<TemplateBackupSnapshot> {
+    return TemplateCleanupService.createBackup({
+      templates: this.templates,
+      relationships: this.templateRelationships,
+      dynoRecords: this.dynoRecords,
+      hydraulicRecords: this.hydraulicRecords,
+      gltRecords: this.gltRecords,
+      certificates: this.certificates,
+      pdfReports: this.pdfReports,
+      adminName: actorName,
+    });
+  }
+
+  public generateDryRunReport(): DryRunReport {
+    return TemplateCleanupService.generateDryRunReport({
+      templates: this.templates,
+      relationships: this.templateRelationships,
+      productModels: this.models,
+      dynoRecords: this.dynoRecords,
+      hydraulicRecords: this.hydraulicRecords,
+      gltRecords: this.gltRecords,
+      certificates: this.certificates,
+      pdfReports: this.pdfReports,
+    });
+  }
+
+  public async executeControlledCleanup(actorName = 'Admin'): Promise<{
+    deletedTemplateIds: string[];
+    skippedTemplateIds: { id: string; reason: string }[];
+    auditLogsGenerated: number;
+  }> {
+    // 1. First create an authoritative backup
+    await this.createTemplateBackup(actorName);
+
+    // 2. Generate dry run report
+    const dryRun = this.generateDryRunReport();
+
+    // 3. Execute controlled cleanup
+    const result = await TemplateCleanupService.executeControlledCleanup({
+      dryRunReport: dryRun,
+      adminName: actorName,
+    });
+
+    // 4. Update local memory state
+    if (result.deletedTemplateIds.length > 0) {
+      const deletedSet = new Set(result.deletedTemplateIds);
+      this.templates = this.templates.filter((t) => !deletedSet.has(t.id));
+      this.saveToStorageCache();
+      this.notifyListeners();
+    }
+
+    return result;
+  }
+
+  // --- CHANGE RELATIONSHIP TEMPLATE ---
+  public async changeRelationshipTemplate(params: {
+    productId: string;
+    newTemplateId: string;
+    changeReason: string;
+    actorName?: string;
+  }): Promise<{
+    success: boolean;
+    previousTemplateId: string;
+    newTemplateId: string;
+    relationship: TemplateRelationship;
+    activatedTargetTemplate: boolean;
+  }> {
+    const { productId, newTemplateId, changeReason, actorName = 'Admin QC' } = params;
+
+    // 1. Validate Product ID, testing stage and selected Template ID
+    if (!productId || !newTemplateId || !changeReason?.trim()) {
+      throw new Error('Product ID, replacement Template ID, and Change Reason are required.');
+    }
+
+    // Find Target Template
+    const targetTmpl = this.templates.find((t) => t.id === newTemplateId);
+    if (!targetTmpl) {
+      throw new Error(`Target template [${newTemplateId}] does not exist.`);
+    }
+    if (targetTmpl.status === 'ARCHIVED') {
+      throw new Error(`Target template [${newTemplateId}] is ARCHIVED and cannot be assigned.`);
+    }
+
+    // Fallback / Contingency check
+    if (
+      PROTECTED_CONTINGENCY_TEMPLATE_IDS.has(targetTmpl.id) ||
+      targetTmpl.id === 'tmpl-torque-converter-performance-v1' ||
+      isStarterOrFallbackTemplate(targetTmpl.id, targetTmpl.name)
+    ) {
+      throw new Error('Cannot manually assign emergency fallback or starter templates.');
+    }
+
+    // Find product in Product Master
+    const prod = this.models.find(
+      (m) =>
+        m.id === productId ||
+        getProductModelId(m as any) === productId ||
+        `${m.unitModel}-${m.component}`.toUpperCase() === productId.toUpperCase()
+    );
+    if (!prod) {
+      throw new Error(`Product [${productId}] not found in Product Master.`);
+    }
+
+    // Determine testing stage and verify component group compatibility
+    const requiredProcess: 'DYNOTEST' | 'TESTBENCH' = prod.compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH';
+    if (prod.compGroup === 'Engine' && targetTmpl.compGroup !== 'Engine') {
+      throw new Error(`Engine product requires an Engine checksheet template.`);
+    }
+    if (prod.compGroup !== 'Engine' && targetTmpl.compGroup === 'Engine') {
+      throw new Error(`Non-Engine product cannot use an Engine checksheet template.`);
+    }
+
+    // 2. Activate the selected template if it is still DRAFT
+    let activatedTargetTemplate = false;
+    const wasDraft = targetTmpl.status === 'DRAFT';
+    if (wasDraft) {
+      targetTmpl.status = 'ACTIVE';
+      targetTmpl.activatedAt = new Date().toISOString();
+      activatedTargetTemplate = true;
+    }
+    targetTmpl.updatedAt = new Date().toISOString();
+
+    // Find all current active relationships for this productId and stage
+    const existingRels = this.templateRelationships.filter(
+      (r) => r.productId === prod.id || r.productId === productId
+    );
+    const activeRelsForStage = existingRels.filter(
+      (r) =>
+        r.status === 'ACTIVE' &&
+        ((r.finalProcess && r.finalProcess.toUpperCase() === requiredProcess) ||
+         (r.testingProcess && r.testingProcess.toUpperCase() === requiredProcess))
+    );
+
+    const prevTemplateId = activeRelsForStage.length > 0 ? activeRelsForStage[0].templateId : 'NONE';
+    const oldTemplateIds = Array.from(new Set(activeRelsForStage.map((r) => r.templateId).filter(Boolean)));
+
+    // 3. Remove that Product ID only from other active final relationships and old templates' compatibleProductIds
+    const changedTemplates: ChecksheetTemplate[] = [];
+
+    // Update old templates' compatibleProductIds without affecting other products
+    for (const oldTId of oldTemplateIds) {
+      if (oldTId !== targetTmpl.id) {
+        const oldTmpl = this.templates.find((t) => t.id === oldTId);
+        if (oldTmpl && oldTmpl.compatibleProductIds) {
+          const prevList = [...oldTmpl.compatibleProductIds];
+          oldTmpl.compatibleProductIds = oldTmpl.compatibleProductIds.filter(
+            (pid) => pid !== prod.id && pid !== productId
+          );
+          if (prevList.length !== oldTmpl.compatibleProductIds.length) {
+            oldTmpl.updatedAt = new Date().toISOString();
+            changedTemplates.push(oldTmpl);
+          }
+        }
+      }
+    }
+
+    // 4. Add the Product ID to the selected shared template relationship and update template's compatibleProductIds
+    if (!targetTmpl.compatibleProductIds) {
+      targetTmpl.compatibleProductIds = [];
+    }
+    if (!targetTmpl.compatibleProductIds.includes(prod.id)) {
+      targetTmpl.compatibleProductIds.push(prod.id);
+    }
+    changedTemplates.push(targetTmpl);
+
+    // 5 & 6. Deactivate old active relationships for this product + stage, ensuring exactly one active final relationship remains
+    const updatedRelsToSave: TemplateRelationship[] = [];
+
+    for (const rel of activeRelsForStage) {
+      if (rel.templateId !== targetTmpl.id) {
+        rel.status = 'INACTIVE';
+        rel.updatedAt = new Date().toISOString();
+        updatedRelsToSave.push(rel);
+      }
+    }
+
+    // Target relationship setup
+    let targetRel = existingRels.find(
+      (r) =>
+        r.templateId === targetTmpl.id &&
+        ((r.finalProcess && r.finalProcess.toUpperCase() === requiredProcess) ||
+         (r.testingProcess && r.testingProcess.toUpperCase() === requiredProcess))
+    );
+
+    if (targetRel) {
+      targetRel.status = 'ACTIVE';
+      targetRel.templateName = targetTmpl.name;
+      targetRel.productId = prod.id;
+      targetRel.unitModel = prod.unitModel;
+      targetRel.componentName = prod.component;
+      targetRel.productGroup = prod.compGroup;
+      targetRel.finalProcess = requiredProcess;
+      targetRel.version = (targetRel.version || 1) + 1;
+      targetRel.updatedAt = new Date().toISOString();
+      updatedRelsToSave.push(targetRel);
+    } else {
+      const relId = `rel-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      targetRel = {
+        id: relId,
+        relationshipId: relId,
+        productId: prod.id,
+        unitModel: prod.unitModel,
+        componentName: prod.component,
+        productGroup: prod.compGroup,
+        finalProcess: requiredProcess,
+        templateId: targetTmpl.id,
+        templateName: targetTmpl.name,
+        standardProfileId: (prod as any).standardProfileId || 'std-default',
+        compatibleLineIds: prod.compGroup === 'Engine' ? ['dyno-1', 'dyno-2', 'dyno-3'] : ['tb-1', 'tb-2', 'tb-3'],
+        status: 'ACTIVE',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      this.templateRelationships.push(targetRel);
+      updatedRelsToSave.push(targetRel);
+    }
+
+    // 7. Atomic Write via Firestore WriteBatch
+    const auditId = `audit-rel-change-${Date.now()}-${prod.id}`;
+    const auditData = {
+      id: auditId,
+      action: 'RELATIONSHIP_TEMPLATE_CHANGED',
+      collectionName: 'templateRelationships',
+      documentId: targetRel.relationshipId,
+      userName: actorName,
+      userRole: 'ADMIN',
+      timestamp: new Date().toISOString(),
+      productId: prod.id,
+      oldTemplateId: prevTemplateId,
+      newTemplateId: targetTmpl.id,
+      testingStage: requiredProcess,
+      changedBy: actorName,
+      changeReason,
+      changedDate: new Date().toISOString(),
+      activatedTargetTemplate,
+      details: `Changed template for Product [${prod.id}] (${prod.unitModel} - ${prod.component}) for stage [${requiredProcess}]. Previous: [${prevTemplateId}] -> New: [${targetTmpl.id}] (${targetTmpl.name}). Target template activated: ${activatedTargetTemplate ? 'YES' : 'NO'}. Reason: ${changeReason}`,
+      previousValue: { templateId: prevTemplateId },
+      newValue: { templateId: targetTmpl.id, templateName: targetTmpl.name, reason: changeReason, activated: activatedTargetTemplate },
+    };
+
+    try {
+      const { writeBatch, doc } = await import('firebase/firestore');
+      const { db } = await import('../lib/firebase');
+
+      const batch = writeBatch(db);
+
+      // Write changed templates
+      for (const tmpl of changedTemplates) {
+        const tmplRef = doc(db, 'checksheetTemplates', tmpl.id);
+        batch.set(tmplRef, sanitizeFirestoreValue(tmpl), { merge: true });
+      }
+
+      // Write updated relationships across all relationship collections
+      for (const rel of updatedRelsToSave) {
+        const rId = rel.relationshipId || rel.id || `rel-${Date.now()}`;
+        const rel1 = doc(db, 'templateRelationships', rId);
+        const rel2 = doc(db, 'productChecksheetRelationships', rId);
+        const rel3 = doc(db, 'finalTestTemplateRelationships', rId);
+        const sanitizedRel = sanitizeFirestoreValue(rel);
+        batch.set(rel1, sanitizedRel, { merge: true });
+        batch.set(rel2, sanitizedRel, { merge: true });
+        batch.set(rel3, sanitizedRel, { merge: true });
+      }
+
+      // Write audit log
+      const auditDocRef = doc(db, 'auditLogs', auditId);
+      batch.set(auditDocRef, sanitizeFirestoreValue(auditData));
+
+      // Await atomic Firestore write
+      await batch.commit();
+      this.auditLogs.unshift(auditData);
+    } catch (err) {
+      console.warn('[storageEngine] Firestore batch write failed, fallback saving individual documents:', err);
+      for (const tmpl of changedTemplates) {
+        await saveDocument('checksheetTemplates', tmpl);
+      }
+      for (const rel of updatedRelsToSave) {
+        await saveDocument('templateRelationships', rel);
+        await saveDocument('productChecksheetRelationships', rel);
+        await saveDocument('finalTestTemplateRelationships', rel);
+      }
+      await logAuditEvent(auditData);
+      this.auditLogs.unshift(auditData);
+    }
+
+    // 8. Update in-memory state and cache
+    this.saveToStorageCache();
+    this.notifyListeners();
+
+    return {
+      success: true,
+      previousTemplateId: prevTemplateId,
+      newTemplateId: targetTmpl.id,
+      relationship: targetRel,
+      activatedTargetTemplate,
+    };
   }
 }
 

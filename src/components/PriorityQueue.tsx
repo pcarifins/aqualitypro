@@ -27,7 +27,21 @@ import { QueueRecord, CompGroup, UserRole, ProductModel, TestingLine, TestOverri
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { calculateOverallCapacity, calculateScheduleForQueue } from '../utils/capacityCalculator';
+import { isProductCompatibleWithLine } from '../utils/lineQueueService';
 import { LineSetupModal } from './LineSetupModal';
+
+const TOP3_PHYSICAL_LINES = [
+  { id: 'glt-engine', label: 'GLT Engine', group: 'Engine' },
+  { id: 'glt-pt-ppm', label: 'GLT PT-PPM', group: 'PT-PPM' },
+  { id: 'dyno-1', label: 'Dyno 1', group: 'Engine' },
+  { id: 'dyno-2', label: 'Dyno 2', group: 'Engine' },
+  { id: 'dyno-3', label: 'Dyno 3', group: 'Engine' },
+  { id: 'tb-1', label: 'TB1', group: 'PT-PPM' },
+  { id: 'tb-2', label: 'TB2', group: 'PT-PPM' },
+  { id: 'tb-3', label: 'TB3', group: 'PT-PPM' },
+  { id: 'mobile-tb', label: 'MTB', group: 'PT-PPM' },
+  { id: 'tb-4-cyl', label: 'TB4', group: 'Cylinder' },
+];
 
 interface PriorityQueueProps {
   currentUserRole: UserRole | string;
@@ -62,6 +76,15 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [targetPriority, setTargetPriority] = useState<number>(1);
   const [reorderRemark, setReorderRemark] = useState('');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Top 3 Priority Swap Modal State
+  const [selectedSpvLineId, setSelectedSpvLineId] = useState<string>('glt-engine');
+  const [showSwapModal, setShowSwapModal] = useState(false);
+  const [swapTargetRank, setSwapTargetRank] = useState<number>(1);
+  const [selectedReplacementJOId, setSelectedReplacementJOId] = useState<string>('');
+  const [swapSearchQuery, setSwapSearchQuery] = useState('');
+  const [swapError, setSwapError] = useState<string | null>(null);
+  const [isSwapping, setIsSwapping] = useState(false);
 
   // New JO Form State
   const [newJoNumber, setNewJoNumber] = useState('');
@@ -229,6 +252,50 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     return calculateScheduleForQueue(rankedQueue, testingLines, testOverrides);
   }, [rankedQueue, testingLines, testOverrides]);
 
+  const selectedSpvLineObj = useMemo(() => {
+    return TOP3_PHYSICAL_LINES.find((l) => l.id === selectedSpvLineId) || TOP3_PHYSICAL_LINES[0];
+  }, [selectedSpvLineId]);
+
+  const currentlyTestingJOForSelectedLine = useMemo(() => {
+    return queueList.find((q) => {
+      if (q.status !== 'ON_PROCESS') return false;
+      const targetLine = q.currentTestingLineId || q.testingLineId || q.priorityLineId;
+      return targetLine === selectedSpvLineId;
+    });
+  }, [queueList, selectedSpvLineId]);
+
+  const top3WaitingForSelectedLine = useMemo(() => {
+    const lineObj = testingLines.find((l) => l.id === selectedSpvLineId) || ({
+      id: selectedSpvLineId,
+      name: selectedSpvLineObj.label,
+      componentGroup: selectedSpvLineObj.group,
+      process: selectedSpvLineId.startsWith('glt') ? 'GLT' : selectedSpvLineId.startsWith('dyno') ? 'Dynotest' : 'Testbench',
+      active: true,
+    } as TestingLine);
+
+    const eligible = queueList.filter((q) => {
+      if (q.status === 'ON_PROCESS' || q.status === 'FINISH') return false;
+      if (q.isTopPriority && q.priorityLineId && q.priorityLineId !== selectedSpvLineId) {
+        return false;
+      }
+      return isProductCompatibleWithLine(q, lineObj, productModels);
+    });
+
+    eligible.sort((a, b) => {
+      const aStarred = a.isTopPriority && a.priorityLineId === selectedSpvLineId;
+      const bStarred = b.isTopPriority && b.priorityLineId === selectedSpvLineId;
+      if (aStarred && !bStarred) return -1;
+      if (!aStarred && bStarred) return 1;
+      if (aStarred && bStarred) return (a.topPriorityRank || 99) - (b.topPriorityRank || 99);
+      const prioA = a.currentPriority || a.plannedPriority || 9999;
+      const prioB = b.currentPriority || b.plannedPriority || 9999;
+      if (prioA !== prioB) return prioA - prioB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+
+    return eligible.slice(0, 3);
+  }, [queueList, selectedSpvLineId, testingLines, productModels, selectedSpvLineObj]);
+
   const handleSyncPPC = async () => {
     setIsLoading(true);
     const res = await apiClient.syncPPCDataSource(currentUserName);
@@ -294,6 +361,186 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
     if (!canReorder) return;
     await apiClient.applyAIRecommendation(item.queueRecordId, currentUserName);
     await loadQueue();
+  };
+
+  const swapCandidateJOs = useMemo(() => {
+    const lineObj = testingLines.find((l) => l.id === selectedSpvLineId) || ({
+      id: selectedSpvLineId,
+      name: selectedSpvLineObj.label,
+      componentGroup: selectedSpvLineObj.group,
+      process: selectedSpvLineId.startsWith('glt')
+        ? 'GLT'
+        : selectedSpvLineId.startsWith('dyno')
+        ? 'Dynotest'
+        : 'Testbench',
+      active: true,
+    } as TestingLine);
+
+    return queueList.filter((q) => {
+      // Exclude running, finish, or troubleshooting
+      if (q.status === 'ON_PROCESS' || q.status === 'FINISH' || (q.status as string) === 'TROUBLESHOOTING') {
+        return false;
+      }
+
+      // 1. GLT Engine
+      if (selectedSpvLineId === 'glt-engine') {
+        if (q.compGroup !== 'Engine') return false;
+        if (q.testType === 'RETEST') return false;
+        if (q.gltStatus === 'GOOD') return false;
+      }
+      // 2. GLT PT-PPM
+      else if (selectedSpvLineId === 'glt-pt-ppm') {
+        if (q.compGroup !== 'PT-PPM') return false;
+        if (q.testType === 'RETEST') return false;
+        if (q.gltStatus === 'GOOD') return false;
+      }
+      // 3. Dyno 1-3
+      else if (selectedSpvLineId.startsWith('dyno-')) {
+        if (q.compGroup !== 'Engine') return false;
+        if (q.testType !== 'RETEST' && q.gltStatus !== 'GOOD') return false;
+      }
+      // 4. TB1, TB2, TB3, MTB
+      else if (['tb-1', 'tb-2', 'tb-3', 'mobile-tb'].includes(selectedSpvLineId)) {
+        if (q.compGroup !== 'PT-PPM') return false;
+        if (q.testType !== 'RETEST' && q.gltStatus !== 'GOOD') return false;
+      }
+      // 5. TB4 (Cylinder)
+      else if (selectedSpvLineId === 'tb-4-cyl') {
+        if (q.compGroup !== 'Cylinder') return false;
+      }
+
+      // Compatibility check
+      return isProductCompatibleWithLine(q, lineObj, productModels);
+    });
+  }, [queueList, selectedSpvLineId, testingLines, productModels, selectedSpvLineObj]);
+
+  const filteredCandidateJOs = useMemo(() => {
+    if (!swapSearchQuery.trim()) return swapCandidateJOs;
+    const s = swapSearchQuery.trim().toUpperCase();
+    return swapCandidateJOs.filter(
+      (q) =>
+        q.joRoNumber.toUpperCase().includes(s) ||
+        q.unitModel.toUpperCase().includes(s) ||
+        q.component.toUpperCase().includes(s) ||
+        (q.testType || '').toUpperCase().includes(s)
+    );
+  }, [swapCandidateJOs, swapSearchQuery]);
+
+  const handleToggleStar = async (item: QueueRecord, destProc?: string) => {
+    if (!canReorder || item.status === 'ON_PROCESS' || item.status === 'FINISH') return;
+
+    if (item.isTopPriority) {
+      await store.updateQueueRecord(item.queueRecordId, {
+        isTopPriority: false,
+        topPriorityRank: undefined,
+        priorityLineId: undefined,
+        prioritySelectedBy: undefined,
+        prioritySelectedAt: undefined,
+        priorityReason: undefined,
+      });
+      await loadQueue();
+      return;
+    }
+
+    // Determine target line for this item
+    let targetLine = selectedSpvLineId;
+    if (item.compGroup === 'Engine') {
+      targetLine = item.gltStatus === 'GOOD' || item.testType === 'RETEST' ? 'dyno-1' : 'glt-engine';
+    } else if (item.compGroup === 'PT-PPM') {
+      targetLine = item.gltStatus === 'GOOD' || item.testType === 'RETEST' ? 'tb-1' : 'glt-pt-ppm';
+    } else if (item.compGroup === 'Cylinder') {
+      targetLine = 'tb-4-cyl';
+    }
+    setSelectedSpvLineId(targetLine);
+    setSwapTargetRank(1);
+    setSelectedReplacementJOId(item.queueRecordId);
+    setSwapSearchQuery('');
+    setSwapError(null);
+    setShowSwapModal(true);
+  };
+
+  const handleConfirmSwapPriority = async () => {
+    if (!selectedReplacementJOId || isSwapping) return;
+    setIsSwapping(true);
+    setSwapError(null);
+
+    try {
+      const replacementJO = queueList.find((q) => q.queueRecordId === selectedReplacementJOId);
+      if (!replacementJO) {
+        setSwapError('Selected JO not found');
+        setIsSwapping(false);
+        return;
+      }
+
+      // Current JO occupying slot swapTargetRank for selectedSpvLineId
+      const currentSlotJO = queueList.find(
+        (q) =>
+          q.isTopPriority &&
+          q.priorityLineId === selectedSpvLineId &&
+          q.topPriorityRank === swapTargetRank &&
+          q.status !== 'FINISH'
+      );
+
+      // Is replacementJO already in a top 3 slot on selectedSpvLineId?
+      const replacementIsTop3OnSameLine =
+        replacementJO.isTopPriority &&
+        replacementJO.priorityLineId === selectedSpvLineId &&
+        replacementJO.topPriorityRank &&
+        replacementJO.topPriorityRank !== swapTargetRank;
+
+      if (replacementIsTop3OnSameLine && currentSlotJO) {
+        // Swap ranks atomically
+        const oldRank = replacementJO.topPriorityRank!;
+        await store.updateQueueRecord(replacementJO.queueRecordId, {
+          isTopPriority: true,
+          topPriorityRank: swapTargetRank,
+          priorityLineId: selectedSpvLineId,
+          prioritySelectedBy: currentUserName,
+          prioritySelectedAt: new Date().toISOString(),
+          priorityReason: 'SPV Priority Swap',
+        });
+
+        await store.updateQueueRecord(currentSlotJO.queueRecordId, {
+          isTopPriority: true,
+          topPriorityRank: oldRank,
+          priorityLineId: selectedSpvLineId,
+          prioritySelectedBy: currentUserName,
+          prioritySelectedAt: new Date().toISOString(),
+          priorityReason: 'SPV Priority Swap',
+        });
+      } else {
+        // Demote currentSlotJO if exists
+        if (currentSlotJO) {
+          await store.updateQueueRecord(currentSlotJO.queueRecordId, {
+            isTopPriority: false,
+            topPriorityRank: undefined,
+            priorityLineId: undefined,
+            prioritySelectedBy: undefined,
+            prioritySelectedAt: undefined,
+            priorityReason: undefined,
+          });
+        }
+
+        // Promote replacementJO
+        await store.updateQueueRecord(replacementJO.queueRecordId, {
+          isTopPriority: true,
+          topPriorityRank: swapTargetRank,
+          priorityLineId: selectedSpvLineId,
+          prioritySelectedBy: currentUserName,
+          prioritySelectedAt: new Date().toISOString(),
+          priorityReason: 'SPV Priority Swap',
+        });
+      }
+
+      await loadQueue();
+      setShowSwapModal(false);
+      setSelectedReplacementJOId('');
+      setSwapSearchQuery('');
+    } catch (err: any) {
+      setSwapError(err?.message || 'Failed to swap priority');
+    } finally {
+      setIsSwapping(false);
+    }
   };
 
   const handleSaveNewJO = async (e: React.FormEvent) => {
@@ -398,49 +645,161 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
       setIsSubmittingJO(false);
     }
   };
-
-
-  const handleToggleStar = async (item: QueueRecord, destinationProcess: string) => {
-    if (!canReorder || item.status === 'ON_PROCESS' || item.status === 'FINISH') return;
-
-    if (item.isTopPriority) {
-      try {
-        const { store } = await import('../data/storageEngine');
-        await store.updateQueueRecord(item.queueRecordId, {
-          isTopPriority: false,
-          topPriorityRank: null,
-          priorityDestination: null,
-          prioritySelectedBy: null,
-          prioritySelectedAt: null
-        });
-        await loadQueue();
-      } catch (err) {
-        console.error(err);
-      }
-    } else {
-      const currentStarred = queueList.filter(q => q.isTopPriority && q.priorityDestination === destinationProcess && q.status === 'WAITING');
-      if (currentStarred.length >= 3) {
-        alert(`Maximum of 3 starred JOs allowed for ${destinationProcess}. Please unstar an existing JO first.`);
-        return;
-      }
-      try {
-        const { store } = await import('../data/storageEngine');
-        await store.updateQueueRecord(item.queueRecordId, {
-          isTopPriority: true,
-          topPriorityRank: currentStarred.length + 1,
-          priorityDestination: destinationProcess,
-          prioritySelectedBy: currentUserName,
-          prioritySelectedAt: new Date().toISOString()
-        });
-        await loadQueue();
-      } catch (err) {
-        console.error(err);
-      }
-    }
-  };
   return (
     <div className="space-y-4 max-w-7xl mx-auto pb-12 animate-in fade-in duration-300">
-      {/* COMPACT CONTROL CARD */}
+      {/* TOP-3 PRIORITY BY LINE CONTROL CARD FOR SPV */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h2 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center space-x-2">
+              <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500 shrink-0" />
+              <span>Top-3 Priority by Line</span>
+            </h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Select line to view currently testing and top-3 waiting priority queue
+            </p>
+          </div>
+
+          {/* Line Selection Buttons */}
+          <div className="flex flex-wrap gap-1.5">
+            {TOP3_PHYSICAL_LINES.map((line) => {
+              const isSelected = selectedSpvLineId === line.id;
+              return (
+                <button
+                  key={line.id}
+                  type="button"
+                  onClick={() => setSelectedSpvLineId(line.id)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {line.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* CURRENTLY TESTING SECTION */}
+        {currentlyTestingJOForSelectedLine ? (
+          <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-md flex items-center space-x-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                <span>CURRENTLY TESTING</span>
+              </span>
+              <div>
+                <div className="font-mono font-bold text-slate-900 text-xs">
+                  JO: {currentlyTestingJOForSelectedLine.joRoNumber}
+                </div>
+                <div className="text-[11px] font-medium text-slate-600">
+                  {currentlyTestingJOForSelectedLine.unitModel} • {currentlyTestingJOForSelectedLine.component}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 text-xs text-slate-700">
+              <span className="font-semibold bg-white px-2 py-1 rounded border border-amber-200 text-[10px]">
+                {currentlyTestingJOForSelectedLine.testType}
+              </span>
+              <span className="font-semibold bg-white px-2 py-1 rounded border border-amber-200 text-[10px]">
+                {selectedSpvLineObj.label}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-2.5 text-center text-xs text-slate-400 font-medium">
+            CURRENTLY TESTING: No active test running on {selectedSpvLineObj.label}
+          </div>
+        )}
+
+        {/* NEXT TOP-3 QUEUE */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[1, 2, 3].map((rank) => {
+            const jo = top3WaitingForSelectedLine[rank - 1];
+            return (
+              <div
+                key={rank}
+                className={`p-3.5 rounded-xl border transition-all ${
+                  jo
+                    ? 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+                    : 'bg-slate-50/30 border-dashed border-slate-200 text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md">
+                    Priority {rank}
+                  </span>
+                  {jo && (
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded border bg-emerald-100 text-emerald-800 border-emerald-200">
+                      {jo.testType}
+                    </span>
+                  )}
+                </div>
+
+                {jo ? (
+                  <div className="space-y-1">
+                    <div className="font-mono font-black text-sm text-blue-900">
+                      JO {jo.joRoNumber}
+                    </div>
+                    <div className="text-xs font-bold text-slate-800 truncate" title={jo.unitModel}>
+                      {jo.unitModel}
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-600 truncate" title={jo.component}>
+                      {jo.component}
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-200/60 mt-2">
+                      <span>Line: <strong className="text-slate-700">{selectedSpvLineObj.label}</strong></span>
+                      <span className="font-bold text-indigo-700">
+                        {jo.gltStatus === 'GOOD' ? 'GLT READY' : 'WAITING'}
+                      </span>
+                    </div>
+                    {canReorder && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSwapTargetRank(rank);
+                          setSelectedReplacementJOId('');
+                          setSwapSearchQuery('');
+                          setSwapError(null);
+                          setShowSwapModal(true);
+                        }}
+                        className="mt-2 w-full text-[11px] font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 py-1 rounded-lg transition-colors cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <RefreshCw className="w-3 h-3 text-blue-600" />
+                        <span>Change</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-2 text-center text-xs text-slate-400 font-medium space-y-2">
+                    <div>No Priority {rank} JO assigned</div>
+                    {canReorder && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSwapTargetRank(rank);
+                          setSelectedReplacementJOId('');
+                          setSwapSearchQuery('');
+                          setSwapError(null);
+                          setShowSwapModal(true);
+                        }}
+                        className="w-full text-[11px] font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 py-1 rounded-lg transition-colors cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <Plus className="w-3 h-3 text-blue-600" />
+                        <span>Assign Priority #{rank}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* COMPACT SEARCH & FILTER BAR */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center gap-4">
         {/* Search */}
         <div className="relative flex-1">
@@ -758,6 +1117,139 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* SWAP PRIORITY MODAL */}
+      {showSwapModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">
+                  Change Priority #{swapTargetRank} — {selectedSpvLineObj.label}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Select an eligible JO to assign or swap into Priority #{swapTargetRank}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSwapModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Read-Only Selected Line & Priority Slot */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1.5 font-semibold">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Selected Physical Line:</span>
+                <span className="text-slate-900 font-bold">{selectedSpvLineObj.label}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Priority Slot:</span>
+                <span className="text-blue-700 font-bold">Priority #{swapTargetRank}</span>
+              </div>
+            </div>
+
+            {swapError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold px-3 py-2 rounded-xl flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{swapError}</span>
+              </div>
+            )}
+
+            {/* Search JO */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-bold text-slate-700">
+                Select Replacement JO *
+              </label>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search JO, Unit, Component, Test Type..."
+                  value={swapSearchQuery}
+                  onChange={(e) => setSwapSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl font-medium focus:outline-none focus:border-blue-600"
+                />
+              </div>
+
+              {/* Searchable Dropdown List */}
+              <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white">
+                {filteredCandidateJOs.length > 0 ? (
+                  filteredCandidateJOs.map((cand) => {
+                    const isSelected = selectedReplacementJOId === cand.queueRecordId;
+                    const isCurrentInSlot =
+                      cand.isTopPriority &&
+                      cand.priorityLineId === selectedSpvLineId &&
+                      cand.topPriorityRank === swapTargetRank;
+
+                    return (
+                      <button
+                        key={cand.queueRecordId}
+                        type="button"
+                        onClick={() => setSelectedReplacementJOId(cand.queueRecordId)}
+                        className={`w-full p-2.5 text-left text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/80 font-bold text-blue-900 border-l-4 border-l-blue-600'
+                            : 'hover:bg-slate-50 text-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-mono font-bold text-blue-800">{cand.joRoNumber}</span>
+                            <span className="text-[10px] font-semibold bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                              {cand.testType || 'PROD'}
+                            </span>
+                            {isCurrentInSlot && (
+                              <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1 py-0.2 rounded">
+                                Current Slot
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                            {cand.unitModel} • {cand.component}
+                          </div>
+                        </div>
+
+                        {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-4 text-center text-slate-400 text-xs italic">
+                    No eligible JOs match line criteria
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowSwapModal(false)}
+                className="px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!selectedReplacementJOId || isSwapping}
+                onClick={handleConfirmSwapPriority}
+                className={`px-4 py-2 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer ${
+                  !selectedReplacementJOId || isSwapping
+                    ? 'bg-slate-300 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {isSwapping && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSwapping ? 'Swapping...' : 'Swap Priority'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

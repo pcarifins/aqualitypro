@@ -162,9 +162,18 @@ export function resolveFinalTestTemplate(params: {
   finalProcess?: 'DYNOTEST' | 'TESTBENCH' | 'Dynotest' | 'Testbench' | 'Hydraulic Test';
   templates: ChecksheetTemplate[];
   relationships: FinalTestTemplateRelationship[];
-  standardProfiles: ChecksheetStandardProfile[];
+  standardProfiles?: ChecksheetStandardProfile[];
 }): ResolutionResult {
-  const { productId, compGroup, unitModel, component, finalProcess, templates, relationships, standardProfiles } = params;
+  const {
+    productId,
+    compGroup,
+    unitModel,
+    component,
+    finalProcess,
+    templates = [],
+    relationships = [],
+    standardProfiles = [],
+  } = params;
 
   // 1. Determine process
   const rawProcess = finalProcess ? finalProcess.toUpperCase() : compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH';
@@ -185,24 +194,43 @@ export function resolveFinalTestTemplate(params: {
     }
   }
 
-  // 3. Lookup ACTIVE relationship
-  let activeRel: FinalTestTemplateRelationship | undefined;
+  // 3. Lookup ACTIVE relationships (Check for exact Product ID + Process match)
+  let activeRels: FinalTestTemplateRelationship[] = [];
 
   if (targetProductId && relationships && relationships.length > 0) {
-    activeRel = relationships.find(
+    activeRels = relationships.filter(
       (r) =>
         r.status === 'ACTIVE' &&
         r.productId === targetProductId &&
-        r.finalProcess.toUpperCase() === targetProcess
+        ((r.finalProcess && r.finalProcess.toUpperCase() === targetProcess) ||
+         (r.testingProcess && r.testingProcess.toUpperCase() === targetProcess))
     );
   }
 
-  // 4. If active relationship found
-  if (activeRel) {
-    const template = templates.find((t) => t.id === activeRel!.templateId && t.status === 'ACTIVE');
+  // Behavior 3: More than one active relationship
+  // → Show DUPLICATE RELATIONSHIP
+  // → Do not select any template automatically
+  if (activeRels.length > 1) {
+    return {
+      status: 'ERROR',
+      template: null,
+      mergedTemplate: null,
+      relationship: null,
+      standardProfile: null,
+      isPerformanceOnly: false,
+      contingencyReason: 'DUPLICATE RELATIONSHIP: More than one active final relationship exists for Product ID.',
+      failureReason: `DUPLICATE RELATIONSHIP: Found ${activeRels.length} active relationships for Product ID [${targetProductId}] and process [${targetProcess}]. Exactly one relationship is permitted.`,
+    };
+  }
+
+  // Behavior 1: One exact active Product ID relationship
+  // → Load that relationship’s template
+  if (activeRels.length === 1) {
+    const activeRel = activeRels[0];
+    const template = templates.find((t) => t.id === activeRel.templateId && t.status === 'ACTIVE');
 
     if (!template) {
-      // Missing template: trigger contingency mode with explicit failure reason
+      // Configured template missing or inactive: trigger contingency mode
       const contingencyTemplate = findContingencyTemplate(templates);
       return {
         status: 'CONTINGENCY',
@@ -218,18 +246,26 @@ export function resolveFinalTestTemplate(params: {
     }
 
     const standardProfile =
-      standardProfiles.find((sp) => sp.standardProfileId === activeRel!.standardProfileId && sp.status === 'ACTIVE') ||
-      standardProfiles.find((sp) => sp.profileId === activeRel!.standardProfileId && sp.status === 'ACTIVE') ||
-      null;
+      standardProfiles.find(
+        (sp) => (sp.standardProfileId === activeRel.standardProfileId || sp.profileId === activeRel.standardProfileId) && sp.status === 'ACTIVE'
+      ) || null;
 
     const mergedTemplate = mergeTemplateWithStandardProfile(template, standardProfile);
 
-    const isMissingProfile = activeRel.relationshipMode !== 'PERFORMANCE_ONLY' && !standardProfile && activeRel.templateId !== 'tmpl-controlled-performance-only';
+    const isMissingProfile =
+      Boolean(activeRel.standardProfileId &&
+      activeRel.standardProfileId !== 'std-default' &&
+      !standardProfile &&
+      activeRel.relationshipMode !== 'PERFORMANCE_ONLY' &&
+      activeRel.templateId !== 'tmpl-controlled-performance-only' &&
+      activeRel.templateId !== 'tmpl-contingency-performance-only' &&
+      activeRel.templateId !== 'tmpl-torque-converter-performance-v1');
 
     const isPerformanceOnly =
       activeRel.relationshipMode === 'PERFORMANCE_ONLY' ||
       activeRel.templateId === 'tmpl-controlled-performance-only' ||
       activeRel.templateId === 'tmpl-contingency-performance-only' ||
+      activeRel.templateId === 'tmpl-torque-converter-performance-v1' ||
       isMissingProfile;
 
     return {
@@ -248,11 +284,14 @@ export function resolveFinalTestTemplate(params: {
     };
   }
 
-  // 5. Unconfigured product: Trigger contingency mode
+  // Behavior 2: Zero exact relationships
+  // → Load Performance Only fallback
+  // → Never select first active template
+  // → Never use another component’s template as fallback (e.g. PT-PPM must never default to PTO)
   const contingencyTemplate = findContingencyTemplate(templates);
   const failReason = targetProductId
     ? `No active final-test relationship configured for Product ID [${targetProductId}] and process [${targetProcess}].`
-    : `Unconfigured product: Component [${component}], Unit Model [${unitModel}] has no active final-test relationship.`;
+    : `Unconfigured product: Component [${component || 'UNKNOWN'}], Unit Model [${unitModel || 'UNKNOWN'}] has no active final-test relationship.`;
 
   return {
     status: 'CONTINGENCY',
@@ -274,16 +313,18 @@ export function findContingencyTemplate(templates: ChecksheetTemplate[] = []): C
   const list = templates || [];
   const found = list.find(
     (t) =>
-      t.id === 'tmpl-controlled-performance-only' ||
-      t.id === 'tmpl-contingency-performance-only' ||
-      t.id === 'tmpl-tc-perf-v2' ||
-      t.name.toLowerCase().includes('contingency') ||
-      t.name.toLowerCase().includes('performance-only')
+      t.status === 'ACTIVE' &&
+      (t.id === 'tmpl-controlled-performance-only' ||
+        t.id === 'tmpl-contingency-performance-only' ||
+        t.id === 'tmpl-torque-converter-performance-v1' ||
+        t.name.toLowerCase().includes('contingency') ||
+        t.name.toLowerCase().includes('performance-only') ||
+        t.name.toLowerCase().includes('performance only'))
   );
 
   if (found) return found;
 
-  // Fallback minimal performance-only template
+  // Fallback minimal performance-only template (never another component's template like PTO)
   return {
     id: 'tmpl-controlled-performance-only',
     name: 'Controlled Performance Only',

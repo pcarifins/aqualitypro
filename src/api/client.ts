@@ -120,7 +120,7 @@ export const apiClient = {
   },
 
   deleteChecksheetTemplate: async (id: string): Promise<void> => {
-    return store.deleteChecksheetTemplate(id);
+    await store.deleteChecksheetTemplate(id);
   },
 
   // Legacy flat checksheets
@@ -272,6 +272,27 @@ export const apiClient = {
 
   bulkActivateStarterTemplates: async (): Promise<number> => {
     return store.bulkActivateStarterTemplates();
+  },
+
+  changeRelationshipTemplate: async (params: {
+    productId: string;
+    newTemplateId: string;
+    changeReason: string;
+    actorName?: string;
+  }) => {
+    return store.changeRelationshipTemplate(params);
+  },
+
+  generateDryRunReport: async () => {
+    return store.generateDryRunReport();
+  },
+
+  executeControlledCleanup: async (actorName?: string) => {
+    return store.executeControlledCleanup(actorName);
+  },
+
+  createTemplateBackup: async (actorName?: string) => {
+    return store.createTemplateBackup(actorName);
   },
 
   // --- PDF REPORTS & CERTIFICATES ---

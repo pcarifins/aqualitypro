@@ -97,6 +97,64 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Line Selection & Operator Access
+  const userUpper = (currentUser?.name || '').toUpperCase();
+  const userRoleUpper = (currentUser?.role || '').toUpperCase();
+
+  let defaultDyno = 'dyno-1';
+  if (userUpper.includes('YUSUF')) defaultDyno = 'dyno-1';
+  else if (userUpper.includes('LILIK')) defaultDyno = 'dyno-2';
+  else if (userUpper.includes('PRIYONO')) defaultDyno = 'dyno-3';
+  else if (userUpper.includes('DIDI')) defaultDyno = 'dyno-1';
+
+  const [selectedDynoLineId, setSelectedDynoLineId] = useState<string>(defaultDyno);
+
+  const isUnlimitedDynoAccess =
+    userRoleUpper === 'SUPERVISOR' ||
+    userRoleUpper === 'ADMIN' ||
+    userRoleUpper === 'PPC' ||
+    userUpper.includes('DIDI');
+
+  const isDynoLineAllowed = (lineId: string) => {
+    if (isUnlimitedDynoAccess) return true;
+    if (userUpper.includes('YUSUF') && lineId === 'dyno-1') return true;
+    if (userUpper.includes('LILIK') && lineId === 'dyno-2') return true;
+    if (userUpper.includes('PRIYONO') && lineId === 'dyno-3') return true;
+    return false;
+  };
+
+  const currentlyTestingDynoJO = useMemo(() => {
+    return queueRecords.find((q) => {
+      if (q.status !== 'ON_PROCESS') return false;
+      const lineId = q.currentTestingLineId || q.testingLineId || q.priorityLineId;
+      return lineId === selectedDynoLineId;
+    });
+  }, [queueRecords, selectedDynoLineId]);
+
+  const top3WaitingDynoJOs = useMemo(() => {
+    const eligible = queueRecords.filter((q) => {
+      if (q.compGroup !== 'Engine') return false;
+      if (q.status === 'ON_PROCESS' || q.status === 'FINISH') return false;
+      if (q.testType === 'PROD' && q.gltStatus !== 'GOOD') return false;
+      if (q.isTopPriority && q.priorityLineId && q.priorityLineId !== selectedDynoLineId) return false;
+      return true;
+    });
+
+    eligible.sort((a, b) => {
+      const aStarred = a.isTopPriority && a.priorityLineId === selectedDynoLineId;
+      const bStarred = b.isTopPriority && b.priorityLineId === selectedDynoLineId;
+      if (aStarred && !bStarred) return -1;
+      if (!aStarred && bStarred) return 1;
+      if (aStarred && bStarred) return (a.topPriorityRank || 99) - (b.topPriorityRank || 99);
+      const prioA = a.currentPriority || a.plannedPriority || 9999;
+      const prioB = b.currentPriority || b.plannedPriority || 9999;
+      if (prioA !== prioB) return prioA - prioB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+
+    return eligible.slice(0, 3);
+  }, [queueRecords, selectedDynoLineId]);
+
   // Load Queue for Engine
   useEffect(() => {
     apiClient.getQueueRecords().then((qList) => {
@@ -335,6 +393,8 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
           receivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
+          currentTestingLineId: selectedDynoLineId,
+          testingLineId: selectedDynoLineId,
         });
       }
     }
@@ -572,23 +632,77 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
 
       {/* SECTION 1: JO SELECTION FROM PRIORITY QUEUE */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-2">
             <ListOrdered className="w-4 h-4 text-emerald-600" />
             <span>1. Authorized Engine Priority Queue (PROD & RETEST)</span>
           </h3>
-          <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
-            {queueRecords.length} Ready for Dynotest
-          </span>
+
+          {/* Dyno Line Selection Buttons */}
+          <div className="flex items-center space-x-1.5">
+            {[
+              { id: 'dyno-1', label: 'Dyno 1' },
+              { id: 'dyno-2', label: 'Dyno 2' },
+              { id: 'dyno-3', label: 'Dyno 3' },
+            ].map((line) => {
+              const isSelected = selectedDynoLineId === line.id;
+              const isAllowed = isDynoLineAllowed(line.id);
+              return (
+                <button
+                  key={line.id}
+                  type="button"
+                  disabled={!isAllowed}
+                  onClick={() => setSelectedDynoLineId(line.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : isAllowed
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100'
+                  }`}
+                  title={!isAllowed ? 'Assigned to designated operator' : `Select ${line.label}`}
+                >
+                  {line.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* CURRENTLY TESTING CARD */}
+        {currentlyTestingDynoJO && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-md flex items-center space-x-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                <span>CURRENTLY TESTING</span>
+              </span>
+              <div>
+                <div className="font-mono font-bold text-slate-900 text-xs">
+                  JO: {currentlyTestingDynoJO.joRoNumber}
+                </div>
+                <div className="text-[11px] font-medium text-slate-600">
+                  {currentlyTestingDynoJO.unitModel} • {currentlyTestingDynoJO.component}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSelectQueueItem(currentlyTestingDynoJO.queueRecordId)}
+              className="text-xs font-bold text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Resume Testing
+            </button>
+          </div>
+        )}
 
         {/* Priority JO Selector */}
         <Top3QueueCards
-          cards={queueRecords.slice(0, 3)}
+          cards={top3WaitingDynoJOs}
           selectedJONumber={joNumber}
           selectedQueueId={selectedQueueId}
           onSelectCard={(rec) => handleSelectQueueItem(rec.queueRecordId)}
-          emptyMessage="No uncompleted Engine jobs waiting in queue."
+          emptyMessage={`No uncompleted Engine jobs waiting on ${selectedDynoLineId.toUpperCase()}.`}
           accentColor="emerald"
         />
 

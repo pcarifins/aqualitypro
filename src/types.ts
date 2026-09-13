@@ -207,6 +207,8 @@ export interface TestingLine {
   schedulingPriority?: number;
   temporaryUnavailable?: boolean;
   unavailableReason?: string;
+  assignedOperatorIds?: string[];
+  assignedOperatorNames?: string[];
 }
 
 export interface CheckingPointStandard {
@@ -330,6 +332,7 @@ export interface QueueRecord {
   priorityLineId?: string;
   prioritySelectedBy?: string;
   prioritySelectedAt?: string;
+  priorityReason?: string;
   gltStatus?: 'GOOD' | 'NOT_GOOD' | 'PENDING';
   gltReceivingTime?: string;
   receivingTime?: string; // Standard receiving ISO timestamp for active testing process
@@ -511,6 +514,8 @@ export interface DynotestRecord {
   oilTempCelsius?: number;
   blowbyKpa?: number;
   status: RecordStatus;
+  testingLineId?: string;
+  currentTestingLineId?: string;
   gltLeadTimeMinutes?: number; // Calculated: receivingTime - gltIncomingTime
   dynoLeadTimeMinutes?: number; // Calculated: submissionTime - receivingTime
   answers?: ChecksheetAnswer[];
@@ -547,6 +552,8 @@ export interface HydraulicRecord {
   internalLeakageMlMin?: number;
   oilTemperatureCelsius?: number;
   status: RecordStatus;
+  testingLineId?: string;
+  currentTestingLineId?: string;
   gltLeadTimeMinutes?: number; // Calculated: receivingTime - gltIncomingTime
   hydraulicLeadTimeMinutes?: number; // Calculated: submissionTime - receivingTime
   answers?: ChecksheetAnswer[];

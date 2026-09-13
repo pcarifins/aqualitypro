@@ -97,6 +97,70 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Line Selection & Operator Access
+  const userUpper = (currentUser?.name || '').toUpperCase();
+  const userRoleUpper = (currentUser?.role || '').toUpperCase();
+
+  let defaultTb = 'tb-1';
+  if (userUpper.includes('RUDI')) defaultTb = 'tb-1';
+  else if (userUpper.includes('AGUNG')) defaultTb = 'tb-2';
+  else if (userUpper.includes('YANTO')) defaultTb = 'tb-3';
+  else if (userUpper.includes('WENDY')) defaultTb = 'mobile-tb';
+  else if (userUpper.includes('NIRWAN')) defaultTb = 'tb-4-cyl';
+
+  const [selectedTbLineId, setSelectedTbLineId] = useState<string>(defaultTb);
+
+  const isUnlimitedTbAccess =
+    userRoleUpper === 'SUPERVISOR' ||
+    userRoleUpper === 'ADMIN' ||
+    userRoleUpper === 'PPC';
+
+  const isTbLineAllowed = (lineId: string) => {
+    if (isUnlimitedTbAccess) return true;
+    if (userUpper.includes('RUDI') && lineId === 'tb-1') return true;
+    if (userUpper.includes('AGUNG') && lineId === 'tb-2') return true;
+    if (userUpper.includes('YANTO') && lineId === 'tb-3') return true;
+    if (userUpper.includes('WENDY') && lineId === 'mobile-tb') return true;
+    if (userUpper.includes('NIRWAN') && lineId === 'tb-4-cyl') return true;
+    return false;
+  };
+
+  const currentlyTestingTbJO = useMemo(() => {
+    return queueRecords.find((q) => {
+      if (q.status !== 'ON_PROCESS') return false;
+      const lineId = q.currentTestingLineId || q.testingLineId || q.priorityLineId;
+      return lineId === selectedTbLineId;
+    });
+  }, [queueRecords, selectedTbLineId]);
+
+  const top3WaitingTbJOs = useMemo(() => {
+    const eligible = queueRecords.filter((q) => {
+      if (q.status === 'ON_PROCESS' || q.status === 'FINISH') return false;
+      if (selectedTbLineId === 'tb-4-cyl') {
+        if (q.compGroup !== 'Cylinder') return false;
+      } else {
+        if (q.compGroup !== 'PT-PPM') return false;
+        if (q.testType === 'PROD' && q.gltStatus !== 'GOOD') return false;
+      }
+      if (q.isTopPriority && q.priorityLineId && q.priorityLineId !== selectedTbLineId) return false;
+      return true;
+    });
+
+    eligible.sort((a, b) => {
+      const aStarred = a.isTopPriority && a.priorityLineId === selectedTbLineId;
+      const bStarred = b.isTopPriority && b.priorityLineId === selectedTbLineId;
+      if (aStarred && !bStarred) return -1;
+      if (!aStarred && bStarred) return 1;
+      if (aStarred && bStarred) return (a.topPriorityRank || 99) - (b.topPriorityRank || 99);
+      const prioA = a.currentPriority || a.plannedPriority || 9999;
+      const prioB = b.currentPriority || b.plannedPriority || 9999;
+      if (prioA !== prioB) return prioA - prioB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+
+    return eligible.slice(0, 3);
+  }, [queueRecords, selectedTbLineId]);
+
   // Load Queue for PT-PPM and Cylinder
   useEffect(() => {
     apiClient.getQueueRecords().then((qList) => {
@@ -334,6 +398,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
           receivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
+          currentTestingLineId: selectedTbLineId,
+          testingLineId: selectedTbLineId,
         });
       }
     }
@@ -573,23 +639,79 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
 
       {/* SECTION 1: JO SELECTION FROM PRIORITY QUEUE */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-2">
             <ListOrdered className="w-4 h-4 text-cyan-600" />
             <span>1. Authorized Component Priority Queue (PT-PPM & Cylinder)</span>
           </h3>
-          <span className="text-[11px] font-semibold bg-cyan-50 text-cyan-800 px-2 py-0.5 rounded-md border border-cyan-200">
-            {queueRecords.length} Ready for Testbench
-          </span>
+
+          {/* Testbench Line Selection Buttons */}
+          <div className="flex items-center space-x-1.5 flex-wrap">
+            {[
+              { id: 'tb-1', label: 'TB1' },
+              { id: 'tb-2', label: 'TB2' },
+              { id: 'tb-3', label: 'TB3' },
+              { id: 'mobile-tb', label: 'MTB' },
+              { id: 'tb-4-cyl', label: 'TB4' },
+            ].map((line) => {
+              const isSelected = selectedTbLineId === line.id;
+              const isAllowed = isTbLineAllowed(line.id);
+              return (
+                <button
+                  key={line.id}
+                  type="button"
+                  disabled={!isAllowed}
+                  onClick={() => setSelectedTbLineId(line.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : isAllowed
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100'
+                  }`}
+                  title={!isAllowed ? 'Assigned to designated operator' : `Select ${line.label}`}
+                >
+                  {line.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* CURRENTLY TESTING CARD */}
+        {currentlyTestingTbJO && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <span className="bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-md flex items-center space-x-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                <span>CURRENTLY TESTING</span>
+              </span>
+              <div>
+                <div className="font-mono font-bold text-slate-900 text-xs">
+                  JO: {currentlyTestingTbJO.joRoNumber}
+                </div>
+                <div className="text-[11px] font-medium text-slate-600">
+                  {currentlyTestingTbJO.unitModel} • {currentlyTestingTbJO.component}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSelectQueueItem(currentlyTestingTbJO.queueRecordId)}
+              className="text-xs font-bold text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Resume Testing
+            </button>
+          </div>
+        )}
 
         {/* Priority JO Selector */}
         <Top3QueueCards
-          cards={queueRecords.slice(0, 3)}
+          cards={top3WaitingTbJOs}
           selectedJONumber={joNumber}
           selectedQueueId={selectedQueueId}
           onSelectCard={(rec) => handleSelectQueueItem(rec.queueRecordId)}
-          emptyMessage="No uncompleted PT-PPM or Cylinder jobs waiting in queue."
+          emptyMessage={`No uncompleted jobs waiting on ${selectedTbLineId.toUpperCase()}.`}
           accentColor="cyan"
         />
 

@@ -135,11 +135,17 @@ export function getTop3QueueForLine(
   });
 
   // Sort by priority sequence (PPC row order is stored in plannedPriority / currentPriority)
-  // ON_PROCESS items on this line come first, followed by WAITING
+  // Only WAITING items
   eligible.sort((a, b) => {
-    const aOnProcess = a.status === 'ON_PROCESS' && (a.currentTestingLineId || a.testingLineId) === line.id ? 1 : 0;
-    const bOnProcess = b.status === 'ON_PROCESS' && (b.currentTestingLineId || b.testingLineId) === line.id ? 1 : 0;
-    if (aOnProcess !== bOnProcess) return bOnProcess - aOnProcess;
+    const aStarredThisLine = a.isTopPriority && a.priorityLineId === line.id;
+    const bStarredThisLine = b.isTopPriority && b.priorityLineId === line.id;
+
+    if (aStarredThisLine && !bStarredThisLine) return -1;
+    if (!aStarredThisLine && bStarredThisLine) return 1;
+
+    if (aStarredThisLine && bStarredThisLine) {
+      return (a.topPriorityRank || 99) - (b.topPriorityRank || 99);
+    }
 
     const prioA = a.currentPriority || a.plannedPriority || 9999;
     const prioB = b.currentPriority || b.plannedPriority || 9999;
@@ -148,7 +154,19 @@ export function getTop3QueueForLine(
     return (a.createdAt || '').localeCompare(b.createdAt || '');
   });
 
-  return eligible.slice(0, 3);
+  // Return only WAITING items for top 3 next queue
+  return eligible.filter((q) => q.status !== 'ON_PROCESS' && q.status !== 'FINISH').slice(0, 3);
+}
+
+/**
+ * Returns currently testing (ON_PROCESS) JO for a specific line if any.
+ */
+export function getCurrentlyTestingForLine(line: TestingLine, allRecords: QueueRecord[]): QueueRecord | undefined {
+  return allRecords.find((record) => {
+    if (record.status !== 'ON_PROCESS') return false;
+    const targetLine = record.currentTestingLineId || record.testingLineId || record.priorityLineId;
+    return targetLine === line.id;
+  });
 }
 
 /**

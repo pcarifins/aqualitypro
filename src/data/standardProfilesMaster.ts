@@ -377,8 +377,8 @@ export const INITIAL_STANDARD_PROFILES: ChecksheetStandardProfile[] = [
   // --- FINAL DRIVE & AXLE & DIFFERENTIAL PROFILES ---
   {
     standardProfileId: 'prof-final-drive-hd-generic',
-    name: 'HD Final Drive & Axle Standard Profile',
-    templateId: 'tmpl-axle-fd-hd-v2',
+    name: 'HD Final Drive Standard Profile',
+    templateId: 'tmpl-final-drive-wheel-v1',
     componentFamily: 'Final Drive HD',
     unitModel: 'ALL',
     revision: 1,
@@ -389,6 +389,22 @@ export const INITIAL_STANDARD_PROFILES: ChecksheetStandardProfile[] = [
     checkingPointStandards: [
       { itemId: 'item-fd-hub-preload', itemName: 'Hub Bearing Preload / Rolling Resistance', unit: 'Nm', validationType: 'RANGE', minimumValue: 40, maximumValue: 120, mandatory: true },
       { itemId: 'item-fd-seal-leak', itemName: 'Floating Seal Air Leakage Rate', unit: 'kPa/min', validationType: 'MAXIMUM', maximumValue: 10, mandatory: true },
+    ]
+  },
+  {
+    standardProfileId: 'prof-axle-hd-generic',
+    name: 'HD Axle Standard Profile',
+    templateId: 'tmpl-axle-hd-v1',
+    componentFamily: 'Axle HD',
+    unitModel: 'ALL',
+    revision: 1,
+    status: 'ACTIVE',
+    effectiveDate: '2026-03-01T00:00:00Z',
+    createdAt: '2026-03-01T00:00:00Z',
+    updatedAt: '2026-03-01T00:00:00Z',
+    checkingPointStandards: [
+      { itemId: 'item-ax-preload', itemName: 'Axle Hub Preload / Rolling Resistance', unit: 'Nm', validationType: 'RANGE', minimumValue: 35, maximumValue: 110, mandatory: true },
+      { itemId: 'item-ax-seal-leak', itemName: 'Floating Seal Air Leakage Rate', unit: 'kPa/min', validationType: 'MAXIMUM', maximumValue: 10, mandatory: true },
     ]
   },
   {
