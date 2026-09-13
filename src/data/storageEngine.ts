@@ -45,6 +45,7 @@ import { initialTestingLines } from './initialTestingLines';
 import { computeUnifiedAnalytics } from '../services/analyticsService';
 import { normalizeString } from '../utils/normalization';
 import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
+import { cleansePPCProductData } from '../utils/ppcCleansing';
 
 import {
   saveDocument,
@@ -54,6 +55,9 @@ import {
   initializeAndMigrateFirestore,
   sanitizeFirestoreValue,
   testFirestoreConnection,
+  isQuotaError,
+  isFirestoreQuotaExceeded,
+  markQuotaExceeded,
 } from '../lib/firestoreSync';
 
 import {
@@ -1564,8 +1568,17 @@ export class DataStore {
       }
     }
 
-    if (hasChanges) {
-      await batch.commit();
+    if (hasChanges && !isFirestoreQuotaExceeded()) {
+      try {
+        await batch.commit();
+      } catch (err) {
+        if (isQuotaError(err)) {
+          markQuotaExceeded(err);
+          console.warn('[storageEngine] Priorities normalized in local cache; remote commit deferred due to quota limit.');
+        } else {
+          console.error("Error committing normalized priorities to Firestore:", err);
+        }
+      }
     }
     this.saveToStorageCache();
     this.notifyListeners();
@@ -1578,11 +1591,12 @@ export class DataStore {
     const { removeDocument } = await import('../lib/firestoreSync');
     const batch = writeBatch(db);
     
-    // 1. DEDUPLICATION: Safely remove duplicate active queue records for the same (joRoNumber + testType)
+    // 1. DEDUPLICATION: Safely remove duplicate active queue records for the same (joRoNumber + current required process)
     const activeMap = new Map<string, QueueRecord[]>();
     for (const q of records) {
       if (q.status !== 'FINISH') {
-        const key = `${q.joRoNumber.trim().toUpperCase()}_${q.testType || 'PROD'}`;
+        const stage = q.compGroup !== 'Cylinder' && q.gltStatus !== 'GOOD' && q.testType !== 'RETEST' ? 'GLT' : (q.compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH');
+        const key = `${q.joRoNumber.trim().toUpperCase()}_${stage}`;
         if (!activeMap.has(key)) activeMap.set(key, []);
         activeMap.get(key)!.push(q);
       }
@@ -1590,16 +1604,20 @@ export class DataStore {
 
     for (const [key, dups] of activeMap.entries()) {
       if (dups.length > 1) {
-        // Sort to find canonical: ON_PROCESS > GOOD gltStatus > newest updatedAt
+        // Sort to find canonical: ON_PROCESS > newest valid record with assigned compatible line > newest updatedAt
         dups.sort((a, b) => {
           if (a.status === 'ON_PROCESS' && b.status !== 'ON_PROCESS') return -1;
           if (b.status === 'ON_PROCESS' && a.status !== 'ON_PROCESS') return 1;
           if (a.gltStatus === 'GOOD' && b.gltStatus !== 'GOOD') return -1;
           if (b.gltStatus === 'GOOD' && a.gltStatus !== 'GOOD') return 1;
-          return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+          const aHasLine = Boolean(a.currentTestingLineId || a.assignedLineId);
+          const bHasLine = Boolean(b.currentTestingLineId || b.assignedLineId);
+          if (aHasLine && !bHasLine) return -1;
+          if (!aHasLine && bHasLine) return 1;
+          return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
         });
 
-        // Keep dups[0], remove others
+        // Keep dups[0], remove others & log audit
         for (let i = 1; i < dups.length; i++) {
           const dupToRemove = dups[i];
           try {
@@ -1607,6 +1625,16 @@ export class DataStore {
             const rIdx = records.findIndex(r => r.queueRecordId === dupToRemove.queueRecordId);
             if (rIdx >= 0) records.splice(rIdx, 1);
             hasUpdated = true;
+
+            await logAuditEvent({
+              action: 'DUPLICATE_CLEANUP_RESOLVED',
+              collectionName: 'priorityQueue',
+              documentId: dupToRemove.queueRecordId,
+              userName: 'System Cleanup',
+              details: `Resolved and archived duplicate queue record for JO ${dupToRemove.joRoNumber} (${key})`,
+              previousValue: dupToRemove,
+              newValue: { preservedRecordId: dups[0].queueRecordId },
+            });
           } catch (err) {
             console.error('Failed to remove duplicate queue record:', err);
           }
@@ -1614,13 +1642,60 @@ export class DataStore {
       }
     }
 
-    // 2. LINE ASSIGNMENTS AND CANONICAL FIELD SYNC
+    // 2. PPC DATA CLEANSING, LINE ASSIGNMENTS AND CANONICAL FIELD SYNC
     for (const q of records) {
       let canonicalLineId = q.assignedLineId || q.currentTestingLineId || q.testingLineId;
       let schedulingWarning: string | undefined = undefined;
       let currentStage: string = 'GLT';
-      
-      // Match product master ID
+
+      // Store raw PPC values if not present
+      const rawUnit = q.rawUnitModel || q.unitModel;
+      const rawComp = q.rawComponent || q.component;
+      q.rawUnitModel = rawUnit;
+      q.rawComponent = rawComp;
+
+      // Run deterministic PPC Data Cleansing
+      const cleanseRes = cleansePPCProductData(rawUnit, rawComp, q.compGroup, this.models);
+      const prevProductModelId = q.productModelId;
+
+      if (cleanseRes.isMatch) {
+        q.unitModel = cleanseRes.canonicalUnitModel;
+        q.component = cleanseRes.canonicalComponent;
+        q.productModelId = cleanseRes.productModelId!;
+        q.productMasterId = cleanseRes.productModelId!;
+        q.isPerformanceOnlyContingency = false;
+      } else {
+        q.isPerformanceOnlyContingency = true;
+      }
+
+      // Audit log only if cleansing result or identity changed and not logged yet
+      if (!q.cleansingLoggedAt || prevProductModelId !== q.productModelId) {
+        q.cleansingLoggedAt = new Date().toISOString();
+        try {
+          await logAuditEvent({
+            action: cleanseRes.action,
+            collectionName: 'priorityQueue',
+            documentId: q.queueRecordId,
+            userName: 'System Cleansing Engine',
+            details: `PPC Cleansing [${cleanseRes.cleansingRule}]: Raw [${rawUnit} / ${rawComp}] -> Canonical [${q.unitModel} / ${q.component}]`,
+            previousValue: { rawUnitModel: rawUnit, rawComponent: rawComp, productModelId: prevProductModelId || null },
+            newValue: {
+              jo: q.joRoNumber,
+              rawUnitModel: rawUnit,
+              rawComponent: rawComp,
+              canonicalUnitModel: q.unitModel,
+              canonicalComponent: q.component,
+              productId: q.productModelId || null,
+              cleansingRule: cleanseRes.cleansingRule,
+              timestamp: q.cleansingLoggedAt,
+            },
+          });
+        } catch (err) {
+          console.error('Failed to log cleansing audit event:', err);
+        }
+      }
+
+      // Match product master
       const product = this.models.find(m => 
         (q.productMasterId && m.id === q.productMasterId) ||
         m.id === q.productModelId || 
@@ -1778,11 +1853,16 @@ export class DataStore {
       }
     }
     
-    if (hasUpdated) {
+    if (hasUpdated && !isFirestoreQuotaExceeded()) {
       try {
         await batch.commit();
       } catch (e) {
-        console.error("Error committing batch line updates:", e);
+        if (isQuotaError(e)) {
+          markQuotaExceeded(e);
+          console.warn('[storageEngine] Line assignments updated in local cache; remote commit deferred due to quota limit.');
+        } else {
+          console.error("Error committing batch line updates:", e);
+        }
       }
     }
     return hasUpdated;

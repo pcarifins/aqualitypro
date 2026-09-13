@@ -14,7 +14,7 @@ import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
 import { evaluateFormResult } from '../utils/formEvaluation';
-import { findMatchingProduct, getCompatibleTemplates } from '../utils/checksheetResolver';
+import { findMatchingProduct, getCompatibleTemplates, resolveFinalTestTemplate, findContingencyTemplate } from '../utils/checksheetResolver';
 import {
   Search,
   Activity,
@@ -184,29 +184,43 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     }
 
     const product = findMatchingProduct(productModels, component, unitModel);
-    if (!product) {
-      setChecksheetItems([]);
-      return;
+    let activeTemplates: ChecksheetTemplate[] = [];
+
+    if (product) {
+      activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Testbench', store.getTemplateRelationships(), store.getStandardProfiles());
     }
 
-    const activeTemplates = getCompatibleTemplates(checksheetTemplates, product, 'Testbench', store.getTemplateRelationships());
+    let matchedTmpl: ChecksheetTemplate | null = activeTemplates.length > 0 ? activeTemplates[0] : null;
 
-    if (activeTemplates.length > 0) {
-      const matchedTmpl = activeTemplates[0];
+    if (!matchedTmpl) {
+      const res = resolveFinalTestTemplate({
+        productId: product?.id,
+        compGroup: compGroup || 'PT-PPM',
+        unitModel,
+        component,
+        finalProcess: 'TESTBENCH',
+        templates: checksheetTemplates,
+        relationships: store.getTemplateRelationships(),
+        standardProfiles: store.getStandardProfiles(),
+      });
+      matchedTmpl = res.mergedTemplate || findContingencyTemplate(checksheetTemplates);
+    }
+
+    if (matchedTmpl && matchedTmpl.sections) {
       const items: ChecksheetItem[] = [];
       matchedTmpl.sections.forEach((sec) => {
         sec.items.forEach((item) => {
           items.push({
             ...item,
             section: sec.name,
-            templateId: matchedTmpl.id,
+            templateId: matchedTmpl!.id,
             process: 'Testbench',
           });
         });
       });
       setChecksheetItems(items);
     } else {
-      setChecksheetItems([]);
+      getChecksheets('Hydraulic Test').then((items) => setChecksheetItems(items));
     }
   }, [component, unitModel, productModels, checksheetTemplates]);
 

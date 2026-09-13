@@ -349,6 +349,10 @@ export interface QueueRecord {
   partNumber?: string;
   serialNumber?: string;
   assemblyMechanic?: string;
+  rawUnitModel?: string;
+  rawComponent?: string;
+  isPerformanceOnlyContingency?: boolean;
+  cleansingLoggedAt?: string;
   createdAt: string;
   updatedAt: string;
   history: PriorityChangeHistory[];

@@ -16,8 +16,6 @@ import {
 } from 'lucide-react';
 import { QueueRecord, TestingLine, User } from '../types';
 import { EmbeddedTimeline } from './EmbeddedTimeline';
-import { formatDateTime } from '../utils/formatters';
-import { calculateOverallCapacity } from '../utils/capacityCalculator';
 
 interface LiveDashboardProps {
   queueRecords: QueueRecord[];
@@ -80,7 +78,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
     const nextJO = waitingJOs[0];
 
-    // 3. Determine operational status: RUNNING / WAITING / IDLE / OFF
+    // 3. Operational status: RUNNING / WAITING / IDLE / OFF
     let opStatus: 'RUNNING' | 'WAITING' | 'IDLE' | 'OFF' = 'IDLE';
     if (runningJO) {
       opStatus = 'RUNNING';
@@ -90,31 +88,37 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       opStatus = 'WAITING';
     }
 
-    // 4. Progress calculation for running JO
-    let progressPct = 0;
-    let progressColorBg = 'bg-[#059669]';
-    let progressColorText = 'text-emerald-700 dark:text-emerald-400';
+    // 4. Actual Lead Time & Progress Bar (capped at 100%, red if exceeding std)
+    let formattedActualLeadTime = '00:00:00';
+    let elapsedSeconds = 0;
+    const stdSeconds = (line.standardDurationMinutes || 120) * 60;
+    let isExceedingStd = false;
 
     if (runningJO) {
       const startIso = runningJO.receivingTime || runningJO.gltReceivingTime || runningJO.updatedAt || runningJO.createdAt;
       const startMs = new Date(startIso).getTime();
-      const elapsedMins = !isNaN(startMs) ? Math.max(0, (currentTime.getTime() - startMs) / 60000) : 0;
-      const stdMins = line.standardDurationMinutes || 120;
-      progressPct = Math.round((elapsedMins / stdMins) * 100);
+      elapsedSeconds = !isNaN(startMs) ? Math.max(0, Math.floor((currentTime.getTime() - startMs) / 1000)) : 0;
 
-      if (progressPct >= 100) {
-        progressColorBg = 'bg-[#DC2626]';
-        progressColorText = 'text-rose-700 dark:text-rose-400';
-      } else if (progressPct >= 80) {
-        progressColorBg = 'bg-[#D97706]';
-        progressColorText = 'text-amber-700 dark:text-amber-400';
+      const h = String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0');
+      const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
+      const s = String(elapsedSeconds % 60).padStart(2, '0');
+      formattedActualLeadTime = `${h}:${m}:${s}`;
+
+      if (elapsedSeconds > stdSeconds) {
+        isExceedingStd = true;
       }
     }
+
+    const barWidthPct = runningJO ? Math.min(100, (elapsedSeconds / stdSeconds) * 100) : 0;
+    const barColor = isExceedingStd ? 'bg-[#DC2626]' : 'bg-[#059669]';
+    const textColor = isExceedingStd
+      ? 'text-rose-600 dark:text-rose-400 font-mono font-bold'
+      : 'text-emerald-600 dark:text-emerald-400 font-mono font-bold';
 
     return (
       <div
         key={line.id}
-        className={`rounded-xl border p-2.5 flex flex-col justify-between h-48 transition-all shadow-xs ${
+        className={`rounded-xl border p-2.5 flex flex-col justify-between h-[210px] transition-all shadow-xs ${
           isTvMode
             ? 'bg-slate-900 border-slate-800 text-slate-100'
             : 'bg-white border-slate-200 text-slate-900'
@@ -183,16 +187,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 {runningJO.component}
               </div>
 
-              {/* Progress Bar & Percentage */}
+              {/* Actual Lead Time & Simple Progress Bar */}
               <div className="pt-1 space-y-0.5">
-                <div className="flex items-center justify-between text-[10px] font-black">
-                  <span className="text-slate-500">Progress</span>
-                  <span className={progressColorText}>{progressPct}%</span>
+                <div className="flex items-center justify-between text-[10px] font-bold">
+                  <span className="text-slate-500 dark:text-slate-400">Actual Lead Time</span>
+                  <span className={textColor}>{formattedActualLeadTime}</span>
                 </div>
                 <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
                   <div
-                    className={`h-full transition-all duration-500 ${progressColorBg}`}
-                    style={{ width: `${Math.min(progressPct, 100)}%` }}
+                    className={`h-full transition-all duration-500 ${barColor}`}
+                    style={{ width: `${barWidthPct}%` }}
                   />
                 </div>
               </div>
@@ -205,16 +209,22 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
 
         {/* Card Footer: Next JO */}
-        <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400">
-          <span>
-            {nextJO ? (
-              <span className="text-blue-600 dark:text-blue-400 font-mono font-bold">
+        <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+          {nextJO ? (
+            <div className="space-y-0.5">
+              <div className="text-blue-600 dark:text-blue-400 font-mono font-bold truncate">
                 Next: JO {nextJO.joRoNumber}
-              </span>
-            ) : (
-              <span className="text-slate-400 italic">Next: No waiting JO</span>
-            )}
-          </span>
+              </div>
+              <div className="text-slate-800 dark:text-slate-200 font-bold truncate" title={nextJO.unitModel}>
+                {nextJO.unitModel}
+              </div>
+              <div className="text-slate-500 dark:text-slate-400 font-normal truncate" title={nextJO.component}>
+                {nextJO.component}
+              </div>
+            </div>
+          ) : (
+            <span className="text-slate-400 italic">Next: No waiting JO</span>
+          )}
         </div>
       </div>
     );
