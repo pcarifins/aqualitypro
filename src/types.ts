@@ -340,6 +340,10 @@ export interface QueueRecord {
   priorityLocked: boolean; // true when test starts (ON_PROCESS)
   testingLineId?: string; // Configured Testing Line assignment
   currentTestingLineId?: string; // Canonical testing line assignment
+  assignedLineId?: string; // Direct assigned line ID
+  assignedLineName?: string; // Direct assigned line Name
+  currentStage?: string; // 'GLT' | 'DYNOTEST' | 'TESTBENCH'
+  priorityRank?: number; // Ranking inside line queue
   remark?: string;
   customer?: string;
   partNumber?: string;

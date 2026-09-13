@@ -150,26 +150,26 @@ export const EmbeddedTimeline: React.FC<EmbeddedTimelineProps> = ({
   // Color coding by process & status override
   const getStatusStyle = (record: QueueRecord, process: 'GLT' | 'Dynotest' | 'Testbench', stdMinutes: number) => {
     if (record.status === 'FINISH') {
-      return 'bg-slate-600 border-slate-700 text-slate-100 hover:bg-slate-500';
+      return 'bg-[#64748B] border-slate-700 text-slate-100 hover:bg-slate-500';
     }
     if (record.status === 'ON_PROCESS') {
       const receiveTime = new Date(record.gltReceivingTime || record.receivingTime || record.createdAt).getTime();
       const elapsedMins = (Date.now() - receiveTime) / 60000;
       if (elapsedMins > stdMinutes) {
-        return 'bg-rose-600 text-white border-rose-400 font-extrabold ring-2 ring-rose-400/60 animate-pulse hover:bg-rose-500';
+        return 'bg-[#DC2626] text-white border-rose-400 font-extrabold ring-2 ring-rose-400/60 animate-pulse hover:bg-rose-500';
       }
-      return 'bg-emerald-600 text-white border-emerald-400 font-extrabold ring-2 ring-emerald-400/60 animate-pulse hover:bg-emerald-500';
+      return 'bg-[#059669] text-white border-emerald-400 font-extrabold ring-2 ring-emerald-400/60 animate-pulse hover:bg-emerald-500';
     }
 
     // WAITING / PLANNED: Use process-specific colors
     if (process === 'GLT') {
-      return 'bg-blue-600 text-white border-blue-700 hover:bg-blue-500';
+      return 'bg-[#2563EB] text-white border-blue-700 hover:bg-blue-500';
     }
     if (process === 'Dynotest') {
-      return 'bg-purple-600 text-white border-purple-700 hover:bg-purple-500';
+      return 'bg-[#7C3AED] text-white border-purple-700 hover:bg-purple-500';
     }
     // Testbench
-    return 'bg-cyan-600 text-white border-cyan-700 hover:bg-cyan-500';
+    return 'bg-[#0891B2] text-white border-cyan-700 hover:bg-cyan-500';
   };
 
   const getStatusLabel = (record: QueueRecord, stdMinutes: number) => {

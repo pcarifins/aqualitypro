@@ -1575,25 +1575,73 @@ export class DataStore {
     let hasUpdated = false;
     const { writeBatch, doc } = await import('firebase/firestore');
     const { db } = await import('../lib/firebase');
+    const { removeDocument } = await import('../lib/firestoreSync');
     const batch = writeBatch(db);
     
+    // 1. DEDUPLICATION: Safely remove duplicate active queue records for the same (joRoNumber + testType)
+    const activeMap = new Map<string, QueueRecord[]>();
     for (const q of records) {
-      let canonicalLineId = q.currentTestingLineId || q.testingLineId;
+      if (q.status !== 'FINISH') {
+        const key = `${q.joRoNumber.trim().toUpperCase()}_${q.testType || 'PROD'}`;
+        if (!activeMap.has(key)) activeMap.set(key, []);
+        activeMap.get(key)!.push(q);
+      }
+    }
+
+    for (const [key, dups] of activeMap.entries()) {
+      if (dups.length > 1) {
+        // Sort to find canonical: ON_PROCESS > GOOD gltStatus > newest updatedAt
+        dups.sort((a, b) => {
+          if (a.status === 'ON_PROCESS' && b.status !== 'ON_PROCESS') return -1;
+          if (b.status === 'ON_PROCESS' && a.status !== 'ON_PROCESS') return 1;
+          if (a.gltStatus === 'GOOD' && b.gltStatus !== 'GOOD') return -1;
+          if (b.gltStatus === 'GOOD' && a.gltStatus !== 'GOOD') return 1;
+          return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+        });
+
+        // Keep dups[0], remove others
+        for (let i = 1; i < dups.length; i++) {
+          const dupToRemove = dups[i];
+          try {
+            await removeDocument('priorityQueue', dupToRemove.queueRecordId);
+            const rIdx = records.findIndex(r => r.queueRecordId === dupToRemove.queueRecordId);
+            if (rIdx >= 0) records.splice(rIdx, 1);
+            hasUpdated = true;
+          } catch (err) {
+            console.error('Failed to remove duplicate queue record:', err);
+          }
+        }
+      }
+    }
+
+    // 2. LINE ASSIGNMENTS AND CANONICAL FIELD SYNC
+    for (const q of records) {
+      let canonicalLineId = q.assignedLineId || q.currentTestingLineId || q.testingLineId;
       let schedulingWarning: string | undefined = undefined;
+      let currentStage: string = 'GLT';
       
+      // Match product master ID
+      const product = this.models.find(m => 
+        (q.productMasterId && m.id === q.productMasterId) ||
+        m.id === q.productModelId || 
+        (normalizeString(m.unitModel) === normalizeString(q.unitModel) && 
+         normalizeString(m.component) === normalizeString(q.component))
+      );
+      if (product && !q.productMasterId) {
+        q.productMasterId = product.id;
+      }
+
       // 1. If GLT is not GOOD and not RETEST, it must be on GLT line first (Cylinder is excluded from GLT)
       if (q.compGroup !== 'Cylinder' && q.gltStatus !== 'GOOD' && q.testType !== 'RETEST') {
         const gltLine = q.compGroup === 'Engine' ? 'glt-engine' : 'glt-pt-ppm';
         if (canonicalLineId !== gltLine) {
           canonicalLineId = gltLine;
         }
+        currentStage = 'GLT';
       } else {
-        // 2. GLT is GOOD or Retest. Auto-schedule based on compatibility!
-        const product = this.models.find(m => m.id === q.productModelId || 
-          (normalizeString(m.unitModel) === normalizeString(q.unitModel) && 
-           normalizeString(m.component) === normalizeString(q.component))
-        );
+        currentStage = q.compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH';
 
+        // 2. GLT is GOOD or Retest. Auto-schedule based on compatibility!
         const testStage = q.compGroup === 'Engine' ? 'Dynotest' : 'Testbench';
         const template = this.getActiveTemplate(q.compGroup, q.unitModel, q.component, testStage);
         const durationMinutes = (product?.standardTestDurationMinutes || 120) + 
@@ -1608,15 +1656,12 @@ export class DataStore {
         if (activeLines.length > 0) {
           // Technical matching logic
           const compatibleCandidates = activeLines.filter(line => {
-            // Power limit check
             if (line.maximumPower && product?.nominalPower && product.nominalPower > line.maximumPower) {
               return false;
             }
-            // Torque limit check
             if (line.maximumTorque && product?.nominalTorque && product.nominalTorque > line.maximumTorque) {
               return false;
             }
-            // RPM limit check
             if (line.maximumRPM && product?.nominalRPM && product.nominalRPM > line.maximumRPM) {
               return false;
             }
@@ -1624,7 +1669,6 @@ export class DataStore {
           });
 
           if (compatibleCandidates.length > 0) {
-            // Find candidate with capacity
             const candidatesWithCapacity = compatibleCandidates.filter(line => {
               const parseTimeToMinutes = (tStr: string | undefined): number => {
                 if (!tStr) return 0;
@@ -1635,9 +1679,8 @@ export class DataStore {
               const endMins = parseTimeToMinutes(line.shiftEnd || '17:00');
               const totalShiftMins = endMins - startMins - (line.breakMinutes || 0);
 
-              // Calculate current assigned load on this line (excluding current item)
               const assignedLoad = records
-                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                .filter(item => (item.assignedLineId || item.currentTestingLineId) === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
                 .reduce((sum, item) => {
                   const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
                   const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
@@ -1648,61 +1691,80 @@ export class DataStore {
               return durationMinutes <= remainingCapacity;
             });
 
-          if (candidatesWithCapacity.length > 0) {
-            // Select the candidate with the lowest queue loading (least busy)
-            let leastBusyLine = candidatesWithCapacity[0];
-            let minAssigned = Infinity;
+            if (candidatesWithCapacity.length > 0) {
+              let leastBusyLine = candidatesWithCapacity[0];
+              let minAssigned = Infinity;
 
-            for (const line of candidatesWithCapacity) {
-              const assignedLoad = records
-                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
-                .reduce((sum, item) => {
-                  const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
-                  const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
-                  return sum + itemDur;
-                }, 0);
+              for (const line of candidatesWithCapacity) {
+                const assignedLoad = records
+                  .filter(item => (item.assignedLineId || item.currentTestingLineId) === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                  .reduce((sum, item) => {
+                    const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
+                    const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
+                    return sum + itemDur;
+                  }, 0);
 
-              if (assignedLoad < minAssigned) {
-                minAssigned = assignedLoad;
-                leastBusyLine = line;
+                if (assignedLoad < minAssigned) {
+                  minAssigned = assignedLoad;
+                  leastBusyLine = line;
+                }
               }
+              if (!canonicalLineId || canonicalLineId.startsWith('glt-')) {
+                canonicalLineId = leastBusyLine.id;
+              }
+              schedulingWarning = undefined;
+            } else {
+              let leastBusyLine = compatibleCandidates[0];
+              let minAssigned = Infinity;
+
+              for (const line of compatibleCandidates) {
+                const assignedLoad = records
+                  .filter(item => (item.assignedLineId || item.currentTestingLineId) === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
+                  .reduce((sum, item) => {
+                    const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
+                    const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
+                    return sum + itemDur;
+                  }, 0);
+
+                if (assignedLoad < minAssigned) {
+                  minAssigned = assignedLoad;
+                  leastBusyLine = line;
+                }
+              }
+              if (!canonicalLineId || canonicalLineId.startsWith('glt-')) {
+                canonicalLineId = leastBusyLine.id;
+              }
+              schedulingWarning = `No compatible line has remaining shift capacity for today (${durationMinutes} mins required). Queued on ${leastBusyLine.name} for the next shift.`;
             }
-            canonicalLineId = leastBusyLine.id;
-            schedulingWarning = undefined;
           } else {
-            // No capacity today! Pick the compatible line with the shortest queue
-            let leastBusyLine = compatibleCandidates[0];
-            let minAssigned = Infinity;
-
-            for (const line of compatibleCandidates) {
-              const assignedLoad = records
-                .filter(item => item.currentTestingLineId === line.id && item.status !== 'FINISH' && item.queueRecordId !== q.queueRecordId)
-                .reduce((sum, item) => {
-                  const itemProd = this.models.find(m => m.id === item.productModelId || (normalizeString(m.unitModel) === normalizeString(item.unitModel) && normalizeString(m.component) === normalizeString(item.component)));
-                  const itemDur = (itemProd?.standardTestDurationMinutes || 120) + (itemProd?.setupTimeMinutes || 30);
-                  return sum + itemDur;
-                }, 0);
-
-              if (assignedLoad < minAssigned) {
-                minAssigned = assignedLoad;
-                leastBusyLine = line;
-              }
+            if (!canonicalLineId || canonicalLineId.startsWith('glt-')) {
+              canonicalLineId = activeLines[0].id;
             }
-            canonicalLineId = leastBusyLine.id;
-            schedulingWarning = `No compatible line has remaining shift capacity for today (${durationMinutes} mins required). Queued on ${leastBusyLine.name} for the next shift.`;
+            schedulingWarning = `WARNING: Technical parameters exceed active limits. Forced onto ${activeLines[0].name}.`;
           }
-        } else {
-          // Technically incompatible with all lines! Force to first but flag warning
-          canonicalLineId = activeLines[0].id;
-          schedulingWarning = `WARNING: Technical parameters exceed active limits. Forced onto ${activeLines[0].name}.`;
         }
       }
-      }
       
-      // If there's a change
-      if (q.currentTestingLineId !== canonicalLineId || q.testingLineId !== canonicalLineId || q.schedulingWarning !== schedulingWarning) {
+      const lineObj = this.testingLines.find(l => l.id === canonicalLineId);
+      const lineName = lineObj ? lineObj.name : canonicalLineId;
+      const rank = q.topPriorityRank || q.currentPriority || 999;
+
+      // If there's a change in fields, sync them
+      if (
+        q.currentTestingLineId !== canonicalLineId ||
+        q.testingLineId !== canonicalLineId ||
+        q.assignedLineId !== canonicalLineId ||
+        q.assignedLineName !== lineName ||
+        q.currentStage !== currentStage ||
+        q.priorityRank !== rank ||
+        q.schedulingWarning !== schedulingWarning
+      ) {
         q.currentTestingLineId = canonicalLineId;
         q.testingLineId = canonicalLineId;
+        q.assignedLineId = canonicalLineId;
+        q.assignedLineName = lineName;
+        q.currentStage = currentStage;
+        q.priorityRank = rank;
         q.schedulingWarning = schedulingWarning;
         q.updatedAt = new Date().toISOString();
         
@@ -1803,8 +1865,15 @@ export class DataStore {
       }
     }
 
+    let currentStage = mergedRecord.compGroup !== 'Cylinder' && mergedRecord.gltStatus !== 'GOOD' && mergedRecord.testType !== 'RETEST' ? 'GLT' : (mergedRecord.compGroup === 'Engine' ? 'DYNOTEST' : 'TESTBENCH');
+    const lineObj = this.testingLines.find(l => l.id === canonicalLineId);
+
     updates.currentTestingLineId = canonicalLineId;
     updates.testingLineId = canonicalLineId;
+    updates.assignedLineId = canonicalLineId;
+    updates.assignedLineName = lineObj ? lineObj.name : canonicalLineId;
+    updates.currentStage = currentStage;
+    updates.priorityRank = updates.topPriorityRank || mergedRecord.topPriorityRank || updates.currentPriority || mergedRecord.currentPriority;
 
     const updatedRecord: QueueRecord = {
       ...this.queueRecords[idx],

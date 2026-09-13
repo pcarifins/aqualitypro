@@ -5,6 +5,7 @@ import {
   Sparkles,
   ArrowUp,
   ArrowDown,
+  ArrowUpDown,
   Lock,
   Plus,
   RefreshCw,
@@ -85,6 +86,15 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const [swapSearchQuery, setSwapSearchQuery] = useState('');
   const [swapError, setSwapError] = useState<string | null>(null);
   const [isSwapping, setIsSwapping] = useState(false);
+
+  // Table Column Sort State
+  const [sortField, setSortField] = useState<'jo' | 'unitModel' | 'component' | 'status' | 'line' | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Change Physical Line Modal State
+  const [showLineChangeModal, setShowLineChangeModal] = useState(false);
+  const [selectedJOForLineChange, setSelectedJOForLineChange] = useState<QueueRecord | null>(null);
+  const [selectedTargetLineId, setSelectedTargetLineId] = useState<string>('');
 
   // New JO Form State
   const [newJoNumber, setNewJoNumber] = useState('');
@@ -251,6 +261,53 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
   const scheduledRankedQueue = useMemo(() => {
     return calculateScheduleForQueue(rankedQueue, testingLines, testOverrides);
   }, [rankedQueue, testingLines, testOverrides]);
+
+  const handleSortColumn = (field: 'jo' | 'unitModel' | 'component' | 'status' | 'line') => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const displayedQueue = useMemo(() => {
+    const items = [...scheduledRankedQueue];
+    if (!sortField) return items;
+
+    items.sort((a, b) => {
+      let valA: any = '';
+      let valB: any = '';
+
+      if (sortField === 'jo') {
+        valA = a.joRoNumber;
+        valB = b.joRoNumber;
+      } else if (sortField === 'unitModel') {
+        valA = a.unitModel || '';
+        valB = b.unitModel || '';
+      } else if (sortField === 'component') {
+        valA = a.component || '';
+        valB = b.component || '';
+      } else if (sortField === 'status') {
+        valA = a.status || '';
+        valB = b.status || '';
+      } else if (sortField === 'line') {
+        const lineA = testingLines.find(
+          (l) => l.id === (a.assignedLineId || a.currentTestingLineId || a.testingLineId)
+        );
+        const lineB = testingLines.find(
+          (l) => l.id === (b.assignedLineId || b.currentTestingLineId || b.testingLineId)
+        );
+        valA = lineA ? lineA.name : (a.assignedLineName || a.assignedLineId || '');
+        valB = lineB ? lineB.name : (b.assignedLineName || b.assignedLineId || '');
+      }
+
+      const cmp = String(valA).localeCompare(String(valB), undefined, { numeric: true });
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+
+    return items;
+  }, [scheduledRankedQueue, sortField, sortDirection, testingLines]);
 
   const selectedSpvLineObj = useMemo(() => {
     return TOP3_PHYSICAL_LINES.find((l) => l.id === selectedSpvLineId) || TOP3_PHYSICAL_LINES[0];
@@ -860,24 +917,90 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
         </div>
       )}
 
-      {/* SIMPLE LIST/TABLE */}
+      {/* QUEUE TABLE */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
-                <th className="py-3 px-4 font-black">Priority / JO</th>
-                <th className="py-3 px-4 font-black">Unit Model</th>
-                <th className="py-3 px-4 font-black">Component</th>
-                <th className="py-3 px-4 font-black">Status</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500 select-none">
+                <th className="py-3 px-3 font-black text-center w-12">No.</th>
+                <th
+                  onClick={() => handleSortColumn('jo')}
+                  className="py-3 px-4 font-black cursor-pointer hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Priority / JO</span>
+                    {sortField === 'jo' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortColumn('unitModel')}
+                  className="py-3 px-4 font-black cursor-pointer hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Unit Model</span>
+                    {sortField === 'unitModel' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortColumn('component')}
+                  className="py-3 px-4 font-black cursor-pointer hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Component</span>
+                    {sortField === 'component' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortColumn('status')}
+                  className="py-3 px-4 font-black cursor-pointer hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Status</span>
+                    {sortField === 'status' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSortColumn('line')}
+                  className="py-3 px-4 font-black cursor-pointer hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Testing Line</span>
+                    {sortField === 'line' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                    )}
+                  </div>
+                </th>
                 <th className="py-3 px-4 font-black text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {scheduledRankedQueue.map((item) => {
+              {displayedQueue.map((item, idx) => {
                 const isOnProcess = item.status === 'ON_PROCESS';
                 const isFinish = item.status === 'FINISH';
                 
+                const assignedLineId = item.assignedLineId || item.currentTestingLineId || item.testingLineId;
+                const assignedLineObj = testingLines.find((l) => l.id === assignedLineId);
+                const lineDisplayName = assignedLineObj ? assignedLineObj.name : (item.assignedLineName || assignedLineId || '-');
+
                 let destinationProcess = 'Testbench';
                 if (item.compGroup === 'Engine') {
                   destinationProcess = item.gltStatus === 'GOOD' || item.testType === 'RETEST' ? 'Dynotest' : 'GLT';
@@ -887,24 +1010,15 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
 
                 return (
                   <tr key={item.queueRecordId} className={`hover:bg-slate-50 transition-colors ${isOnProcess ? 'bg-amber-50/30' : isFinish ? 'bg-emerald-50/20' : ''}`}>
-                    <td className="py-3 px-4 whitespace-nowrap flex items-center space-x-3">
-                      <button
-                        disabled={!canReorder || isOnProcess || isFinish}
-                        onClick={() => handleToggleStar(item, destinationProcess)}
-                        className={`p-1.5 rounded-lg transition-all ${
-                          item.isTopPriority 
-                            ? 'bg-amber-100 text-amber-500 hover:bg-amber-200' 
-                            : 'bg-slate-100 text-slate-300 hover:text-amber-400 hover:bg-slate-200'
-                        } ${(!canReorder || isOnProcess || isFinish) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                        title={item.isTopPriority ? 'Unstar JO' : 'Star as Top 3 Priority'}
-                      >
-                        <Sparkles className={`w-4 h-4 ${item.isTopPriority ? 'fill-current' : ''}`} />
-                      </button>
+                    <td className="py-3 px-3 text-center text-xs font-bold text-slate-400">
+                      {idx + 1}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
                       <div className="flex flex-col">
                         <span className="font-mono font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-xs inline-block w-fit">
                           {item.joRoNumber}
                         </span>
-                        <span className="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-wide">
+                        <span className="text-[10px] text-slate-500 mt-0.5 uppercase font-bold tracking-wide">
                           {destinationProcess}
                         </span>
                       </div>
@@ -935,6 +1049,28 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                         </span>
                       )}
                     </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-bold text-slate-800">
+                          {lineDisplayName}
+                        </span>
+                        {canReorder && !isOnProcess && !isFinish && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedJOForLineChange(item);
+                              setSelectedTargetLineId(assignedLineId || '');
+                              setShowLineChangeModal(true);
+                            }}
+                            className="text-[10px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors cursor-pointer flex items-center space-x-1 border border-blue-200"
+                            title="Change Physical Line"
+                          >
+                            <SlidersHorizontal className="w-2.5 h-2.5" />
+                            <span>Change Line</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-3 px-4 whitespace-nowrap text-right">
                       <button
                         onClick={() => onOpenJODetail(item.joRoNumber)}
@@ -946,9 +1082,9 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
                   </tr>
                 );
               })}
-              {scheduledRankedQueue.length === 0 && (
+              {displayedQueue.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-400 text-xs font-medium">
+                  <td colSpan={7} className="py-8 text-center text-slate-400 text-xs font-medium">
                     No active JOs match the selected filters.
                   </td>
                 </tr>
@@ -957,6 +1093,94 @@ export const PriorityQueue: React.FC<PriorityQueueProps> = ({
           </table>
         </div>
       </div>
+
+      {/* CHANGE PHYSICAL TESTING LINE MODAL */}
+      {showLineChangeModal && selectedJOForLineChange && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center space-x-2">
+                <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                <span>Change Physical Testing Line</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setShowLineChangeModal(false);
+                  setSelectedJOForLineChange(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">JO Number:</span>
+                  <span className="font-mono font-black text-blue-900">{selectedJOForLineChange.joRoNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Unit / Component:</span>
+                  <span className="font-bold text-slate-800">{selectedJOForLineChange.unitModel} • {selectedJOForLineChange.component}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1 pt-2">
+                <label className="text-[11px] font-bold text-slate-700 uppercase">Select Target Physical Line:</label>
+                <select
+                  value={selectedTargetLineId}
+                  onChange={(e) => setSelectedTargetLineId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-blue-500"
+                >
+                  {testingLines
+                    .filter((l) => isProductCompatibleWithLine(selectedJOForLineChange, l, productModels))
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.process})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLineChangeModal(false);
+                  setSelectedJOForLineChange(null);
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!selectedTargetLineId) return;
+                  const lineObj = testingLines.find((l) => l.id === selectedTargetLineId);
+                  const lineName = lineObj ? lineObj.name : selectedTargetLineId;
+                  await store.updateQueueRecord(selectedJOForLineChange.queueRecordId, {
+                    currentTestingLineId: selectedTargetLineId,
+                    testingLineId: selectedTargetLineId,
+                    assignedLineId: selectedTargetLineId,
+                    assignedLineName: lineName,
+                    isTopPriority: false,
+                    topPriorityRank: undefined,
+                  });
+                  setShowLineChangeModal(false);
+                  setSelectedJOForLineChange(null);
+                  await loadQueue();
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-md"
+              >
+                Confirm Line Change
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADD MANUAL JO MODAL */}
       {showAddModal && (

@@ -57,6 +57,78 @@ export function isJobWorkflowReadyForLine(record: QueueRecord, line: TestingLine
   return false;
 }
 
+export function isComponentCompatibleWithLineId(lineId: string, compGroup: string, component: string): boolean {
+  const normComp = (component || '').toUpperCase();
+
+  // GLT Engine & GLT PT-PPM
+  if (lineId === 'glt-engine') {
+    return compGroup === 'Engine';
+  }
+  if (lineId === 'glt-pt-ppm') {
+    return compGroup === 'PT-PPM';
+  }
+
+  // Dyno 1-3: Engine only
+  if (lineId.startsWith('dyno-')) {
+    return compGroup === 'Engine';
+  }
+
+  // TB4: Cylinder only
+  if (lineId === 'tb-4-cyl') {
+    return compGroup === 'Cylinder' || normComp.includes('CYLINDER');
+  }
+
+  // TB1: Fan Pump, Main Pump, Swing Motor, Travel Motor, approved TB1 components
+  if (lineId === 'tb-1') {
+    if (compGroup !== 'PT-PPM') return false;
+    return (
+      normComp.includes('PUMP') ||
+      normComp.includes('SWING MOTOR') ||
+      normComp.includes('TRAVEL MOTOR') ||
+      normComp.includes('FAN') ||
+      normComp.includes('VALVE') ||
+      normComp.includes('HYDRAULIC')
+    );
+  }
+
+  // TB2: Torqflow, Transmission, PTO, Power Module
+  if (lineId === 'tb-2') {
+    if (compGroup !== 'PT-PPM') return false;
+    return (
+      normComp.includes('TORQFLOW') ||
+      normComp.includes('TRANSMISSION') ||
+      normComp.includes('PTO') ||
+      normComp.includes('POWER TAKE OFF') ||
+      normComp.includes('POWER MODULE')
+    );
+  }
+
+  // TB3: Final Drive, Axle, Front Axle, Differential
+  if (lineId === 'tb-3') {
+    if (compGroup !== 'PT-PPM') return false;
+    return (
+      normComp.includes('FINAL DRIVE') ||
+      normComp.includes('AXLE') ||
+      normComp.includes('DIFFERENTIAL')
+    );
+  }
+
+  // MTB (mobile-tb): Final Drive, Differential, PTO, Wheel Brake, Front Axle, Front Brake
+  if (lineId === 'mobile-tb') {
+    if (compGroup !== 'PT-PPM') return false;
+    return (
+      normComp.includes('FINAL DRIVE') ||
+      normComp.includes('DIFFERENTIAL') ||
+      normComp.includes('PTO') ||
+      normComp.includes('POWER TAKE OFF') ||
+      normComp.includes('AXLE') ||
+      normComp.includes('BRAKE')
+    );
+  }
+
+  return true;
+}
+
 /**
  * Checks if a JO is technically compatible with a specific testing line.
  * Evaluates nominal power, torque, and RPM against line technical limits.
@@ -71,16 +143,15 @@ export function isProductCompatibleWithLine(
     return false;
   }
 
-  // If the record was explicitly assigned / locked to a specific line by Admin / Supervisor,
-  // honor that line assignment
-  const assignedLineId = record.currentTestingLineId || record.testingLineId;
-  if (assignedLineId && assignedLineId === line.id) {
-    return true;
+  // Check strict component capability for line
+  if (!isComponentCompatibleWithLineId(line.id, record.compGroup, record.component)) {
+    return false;
   }
 
-  // Find product model for technical limits
+  // Find product model for technical limits using exact productMasterId if available
   const product = productModels.find(
     (m) =>
+      (record.productMasterId && m.id === record.productMasterId) ||
       m.id === record.productModelId ||
       (m.unitModel.trim().toUpperCase() === record.unitModel.trim().toUpperCase() &&
         (m.component || m.compName || '').trim().toUpperCase() === record.component.trim().toUpperCase())
