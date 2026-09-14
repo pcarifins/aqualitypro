@@ -13,7 +13,7 @@ import {
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
-import { evaluateFormResult, validateSubmitReadiness } from '../utils/formEvaluation';
+import { evaluateFormResult } from '../utils/formEvaluation';
 import { findMatchingProduct, getCompatibleTemplates, resolveFinalTestTemplate, findContingencyTemplate } from '../utils/checksheetResolver';
 import {
   Search,
@@ -301,52 +301,28 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   };
 
   const handleReceiveAtTestbench = async () => {
-    const requiresGLT = compGroup === 'PT-PPM' && testType === 'PROD';
-    if (requiresGLT) {
+    if (testType === 'PROD' && compGroup !== 'Cylinder') {
       if (!latestGLTResult) {
-        setValidationError('This Job Order has no completed GLT inspection record. PROD PT-PPM Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
         return;
       }
       if (latestGLTResult !== 'GOOD') {
-        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD PT-PPM Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
         return;
       }
     }
     const nowIso = new Date().toISOString();
-    try {
-      const targetQ =
-        selectedQueueId ||
-        queueRecords.find(
-          (q) =>
-            q.joRoNumber.toUpperCase() ===
-            joNumber.trim().toUpperCase()
-        )?.queueRecordId;
-
-      if (targetQ) {
-        await store.updateQueueRecord(targetQ, {
-          receivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-          currentTestingLineId: selectedTbLineId,
-          testingLineId: selectedTbLineId,
-        });
-      } else if (joNumber) {
-        await store.updateQueueRecordByJONumber(joNumber, {
-          receivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-          currentTestingLineId: selectedTbLineId,
-          testingLineId: selectedTbLineId,
-        });
-      }
-      setReceivingTime(nowIso);
-      setValidationError(null);
-      setToastMessage('Received at Testbench! Testing timer started.');
-      setTimeout(() => setToastMessage(null), 3000);
-    } catch (error: any) {
-      console.error('Failed to update receiving time in queue:', error);
-      setValidationError(`Failed to receive JO: ${error?.message || 'Firestore update error'}`);
+    setReceivingTime(nowIso);
+    setValidationError(null);
+    if (joNumber) {
+      await store.updateQueueRecordByJONumber(joNumber, {
+        receivingTime: nowIso,
+        status: 'ON_PROCESS',
+        priorityLocked: true,
+      });
     }
+    setToastMessage('Received at Testbench! Testing timer started.');
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleAnswerChange = (itemId: string, val: string) => {
@@ -412,28 +388,57 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   const validateForm = (): boolean => {
     setValidationAttempted(true);
 
-    const readiness = validateSubmitReadiness({
-      joNumber,
-      selectedQueueId,
-      productModel,
-      checksheetItems,
-      answers,
-      itemRemarks,
-      testStage: 'Testbench',
-      testType,
-      compGroup,
-      receivingTime,
-      assemblyMechanic,
-      latestGLTResult,
-      isAlreadySubmitted: false,
-    });
+    if (!joNumber.trim()) {
+      setValidationError('Please select or search a valid Component JO Number first.');
+      return false;
+    }
 
-    if (!readiness.ready) {
-      setValidationError(readiness.message);
-      if (readiness.firstInvalidItemId) {
-        const elem = document.getElementById(`checksheet-item-${readiness.firstInvalidItemId}`);
+    if (testType === 'PROD' && compGroup !== 'Cylinder') {
+      if (!latestGLTResult) {
+        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
+        return false;
+      }
+      if (latestGLTResult !== 'GOOD') {
+        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
+        return false;
+      }
+    }
+
+    if (!receivingTime) {
+      const nowIso = new Date().toISOString();
+      setReceivingTime(nowIso);
+      if (joNumber) {
+        store.updateQueueRecordByJONumber(joNumber, {
+          receivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+          currentTestingLineId: selectedTbLineId,
+          testingLineId: selectedTbLineId,
+        });
+      }
+    }
+
+    if (!systemEval.isComplete) {
+      if (systemEval.specMissingItems.length > 0) {
+        setValidationError(
+          `SPECIFICATION NOT CONFIGURED for ${systemEval.specMissingItems.map((i) => i.itemName).join(', ')}. Cannot submit.`
+        );
+      } else {
+        setValidationError(
+          `Please complete all ${systemEval.missingItems.length} mandatory Testbench checksheet items before submitting.`
+        );
+        const firstMissingId = `checksheet-item-${systemEval.missingItems[0].id}`;
+        const elem = document.getElementById(firstMissingId);
         if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
+      return false;
+    }
+
+    const ngItemsWithoutRemark = checksheetItems.filter(
+      (i) => answers[i.id] === 'NOT GOOD' && (!itemRemarks[i.id] || itemRemarks[i.id].trim() === '')
+    );
+    if (ngItemsWithoutRemark.length > 0) {
+      setValidationError('Please provide defect description for all items marked NOT GOOD.');
       return false;
     }
 
@@ -452,25 +457,19 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       let resStatus: 'PASS' | 'FAIL' | 'NA' = 'PASS';
 
       if (norm === 'NUMERIC') {
-        if (!item.validation || item.validation === 'NONE') {
-          const rawJudgment = answers[item.id + '_judgment'] || '';
-          const judgment = rawJudgment === 'GOOD' ? 'PASS' : (rawJudgment === 'NOT GOOD' || rawJudgment === 'NG') ? 'FAIL' : rawJudgment;
-          resStatus = judgment === 'FAIL' ? 'FAIL' : judgment === 'PASS' ? 'PASS' : 'NA';
-        } else {
-          const numEval = evaluateNumericItem(
-            userVal,
-            item.validation,
-            item.minimumValue,
-            item.maximumValue,
-            item.targetValue,
-            item.toleranceValue,
-            item.unit
-          );
-          if (!numEval.hasStandard) resStatus = 'NA';
-          else if (numEval.status === 'FAIL') resStatus = 'FAIL';
-          else if (numEval.status === 'PASS') resStatus = 'PASS';
-          else resStatus = 'NA';
-        }
+        const numEval = evaluateNumericItem(
+          userVal,
+          item.validation,
+          item.minimumValue,
+          item.maximumValue,
+          item.targetValue,
+          item.toleranceValue,
+          item.unit
+        );
+        if (!numEval.hasStandard) resStatus = 'NA';
+        else if (numEval.status === 'FAIL') resStatus = 'FAIL';
+        else if (numEval.status === 'PASS') resStatus = 'PASS';
+        else resStatus = 'NA';
       } else if (norm === 'GOOD_NOT_GOOD') {
         resStatus = userVal === 'NOT GOOD' ? 'FAIL' : userVal === 'GOOD' ? 'PASS' : 'NA';
       } else if (norm === 'YES_NO') {
@@ -551,15 +550,6 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   const handleFinalSubmit = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    setValidationError(null);
-
-    // Revalidate inside confirmation modal before Firestore write
-    if (!validateForm()) {
-      setIsSubmitting(false);
-      setShowConfirmModal(false);
-      return;
-    }
-
     try {
       const submissionTime = new Date().toISOString();
       const finalLeadMinutes = receivingTime
@@ -568,10 +558,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
 
       const answerSnapshots = buildAnswerSnapshots();
 
-      const submissionId = `hyd_${joNumber.trim().toUpperCase()}_${attemptNumber}`;
-
       const recordToSave: HydraulicRecord = {
-        id: submissionId,
+        id: `hyd-${Date.now()}`,
         joNumber: joNumber.trim().toUpperCase(),
         productCategory: 'Power Train Component',
         productModel: productModel || `${unitModel} / ${component}` || 'PT Component',
@@ -852,8 +840,16 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
           </div>
           <h4 className="text-sm font-bold text-rose-900">FATAL: Testing Blocked - No Valid Template Relationship Resolved</h4>
           <p className="text-xs text-rose-800 max-w-lg mx-auto leading-relaxed">
-            Checksheet is not available. Contact Administrator.
+            AQualityPRO has refused to load a generic checksheet for <strong>{component} – {unitModel}</strong> to prevent incorrect template usage. No direct checksheet or explicit relationship has been linked to this Product Master, and no Performance-only contingency checksheet was found for this group in <strong>Testbench</strong>.
           </p>
+          <div className="bg-white border border-rose-150 p-3 rounded-xl max-w-md mx-auto text-left text-xs space-y-1 text-slate-700">
+            <div>• Component: <strong className="font-mono text-slate-900">{component}</strong></div>
+            <div>• Model: <strong className="font-mono text-slate-900">{unitModel}</strong></div>
+            <div>• Required Process: <strong className="text-slate-900">Testbench Hydraulic Performance</strong></div>
+          </div>
+          <div className="pt-2">
+            <span className="text-xs font-bold text-slate-500">Please contact a Quality Administrator to resolve this template link or configure a contingency sheet in Admin Dashboard.</span>
+          </div>
         </div>
       ) : !receivingTime ? (
         <div className="bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl p-7 text-center space-y-3">
@@ -1080,11 +1076,11 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={isSubmitting}
+                disabled={!systemEval.isComplete}
                 className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
-                  isSubmitting
-                    ? 'bg-slate-400 text-slate-500 cursor-not-allowed shadow-none'
-                    : systemEval.status === 'GOOD' || !systemEval.isComplete
+                  !systemEval.isComplete
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                    : systemEval.status === 'GOOD'
                     ? 'bg-cyan-600 hover:bg-cyan-700 text-white'
                     : 'bg-rose-600 hover:bg-rose-700 text-white'
                 }`}
@@ -1092,8 +1088,8 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
                 <Send className="w-5 h-5" />
 
                 <span>
-                  {isSubmitting
-                    ? 'SUBMITTING...'
+                  {!systemEval.isComplete
+                    ? 'COMPLETE CHECKLIST TO SUBMIT'
                     : 'SUBMIT TESTBENCH RESULT'}
                 </span>
               </button>

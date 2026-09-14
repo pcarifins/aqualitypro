@@ -55,9 +55,6 @@ import {
   initializeAndMigrateFirestore,
   sanitizeFirestoreValue,
   testFirestoreConnection,
-  isQuotaError,
-  isFirestoreQuotaExceeded,
-  markQuotaExceeded,
 } from '../lib/firestoreSync';
 
 import {
@@ -1568,17 +1565,8 @@ export class DataStore {
       }
     }
 
-    if (hasChanges && !isFirestoreQuotaExceeded()) {
-      try {
-        await batch.commit();
-      } catch (err) {
-        if (isQuotaError(err)) {
-          markQuotaExceeded(err);
-          console.warn('[storageEngine] Priorities normalized in local cache; remote commit deferred due to quota limit.');
-        } else {
-          console.error("Error committing normalized priorities to Firestore:", err);
-        }
-      }
+    if (hasChanges) {
+      await batch.commit();
     }
     this.saveToStorageCache();
     this.notifyListeners();
@@ -1853,16 +1841,11 @@ export class DataStore {
       }
     }
     
-    if (hasUpdated && !isFirestoreQuotaExceeded()) {
+    if (hasUpdated) {
       try {
         await batch.commit();
       } catch (e) {
-        if (isQuotaError(e)) {
-          markQuotaExceeded(e);
-          console.warn('[storageEngine] Line assignments updated in local cache; remote commit deferred due to quota limit.');
-        } else {
-          console.error("Error committing batch line updates:", e);
-        }
+        console.error("Error committing batch line updates:", e);
       }
     }
     return hasUpdated;

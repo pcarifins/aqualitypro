@@ -16,7 +16,7 @@ import {
 import { apiClient } from '../api/client';
 import { store } from '../data/storageEngine';
 import { ChecksheetRenderer, normalizeInputType, evaluateNumericItem } from './ChecksheetRenderer';
-import { evaluateFormResult, validateSubmitReadiness } from '../utils/formEvaluation';
+import { evaluateFormResult } from '../utils/formEvaluation';
 import { findMatchingProduct, getCompatibleTemplates, resolveGLTTemplate } from '../utils/checksheetResolver';
 import { getTop3QueueForLine } from '../utils/lineQueueService';
 import { Top3QueueCards } from './Top3QueueCards';
@@ -317,12 +317,15 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   };
 
   const handleReceiveAtGLT = async () => {
-    if (!joNumber.trim()) {
-      setValidationError('Please select an authorized JO before receiving at GLT.');
-      return;
-    }
     const nowIso = new Date().toISOString();
     try {
+      if (!joNumber.trim()) {
+        setValidationError(
+          'Please select an authorized JO before receiving at GLT.'
+        );
+        return;
+      }
+
       const targetQ =
         selectedQueueId ||
         queueRecords.find(
@@ -336,21 +339,28 @@ export const GLTForm: React.FC<GLTFormProps> = ({
           gltReceivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
+        }).catch(async () => {
+          await store.updateQueueRecordByJONumber(joNumber.trim(), {
+            gltReceivingTime: nowIso,
+            status: 'ON_PROCESS',
+            priorityLocked: true,
+          }).catch(() => {});
         });
       } else {
         await store.updateQueueRecordByJONumber(joNumber.trim(), {
           gltReceivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
-        });
+        }).catch(() => {});
       }
+    } catch (error: any) {
+      console.warn('Non-blocking queue update warning on receive at GLT:', error);
+    } finally {
+      // Always set local receiving time so user is never blocked from clicking / starting timer
       setReceivingTime(nowIso);
       setValidationError(null);
       setToastMessage('Received at GLT! GLT lead-time timer started.');
       setTimeout(() => setToastMessage(null), 3000);
-    } catch (error: any) {
-      console.error('Failed to update receiving time in queue:', error);
-      setValidationError(`Failed to receive JO: ${error?.message || 'Firestore update error'}`);
     }
   };
 
@@ -414,35 +424,54 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   const validateForm = (): boolean => {
     setValidationAttempted(true);
 
-    if (!actualLineOffDateTime || !actualLineOffDateTime.trim()) {
+    if (!joNumber.trim()) {
+      setValidationError('Please select or enter a valid JO Number.');
+      return false;
+    }
+    if (!receivingTime) {
+      const nowIso = new Date().toISOString();
+      setReceivingTime(nowIso);
+      if (joNumber) {
+        store.updateQueueRecordByJONumber(joNumber, {
+          gltReceivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        });
+      }
+    }
+    if (!assemblyMechanic.trim()) {
+      setAssemblyMechanic(currentUser.name || 'Assembler');
+    }
+
+    if (!actualLineOffDateTime.trim()) {
       setValidationError('Actual Line Off date and time is mandatory before submitting GLT.');
       const elem = document.getElementById('actual-line-off-input');
       if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return false;
     }
 
-    const readiness = validateSubmitReadiness({
-      joNumber,
-      selectedQueueId,
-      productModel,
-      checksheetItems,
-      answers,
-      itemRemarks,
-      testStage: 'GLT',
-      testType,
-      compGroup,
-      receivingTime,
-      assemblyMechanic,
-      latestGLTResult: null,
-      isAlreadySubmitted: false,
-    });
-
-    if (!readiness.ready) {
-      setValidationError(readiness.message);
-      if (readiness.firstInvalidItemId) {
-        const elem = document.getElementById(`checksheet-item-${readiness.firstInvalidItemId}`);
+    if (!systemEval.isComplete) {
+      if (systemEval.specMissingItems.length > 0) {
+        setValidationError(
+          `SPECIFICATION NOT CONFIGURED for ${systemEval.specMissingItems.map((i) => i.itemName).join(', ')}. Cannot submit.`
+        );
+      } else {
+        setValidationError(
+          `Please complete all ${systemEval.missingItems.length} mandatory checksheet items before submitting.`
+        );
+        const firstMissingId = `checksheet-item-${systemEval.missingItems[0].id}`;
+        const elem = document.getElementById(firstMissingId);
         if (elem) elem.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
+      return false;
+    }
+
+    // Check if any defect remark is missing for NOT GOOD items
+    const ngItemsWithoutRemark = checksheetItems.filter(
+      (i) => answers[i.id] === 'NOT GOOD' && (!itemRemarks[i.id] || itemRemarks[i.id].trim() === '')
+    );
+    if (ngItemsWithoutRemark.length > 0) {
+      setValidationError('Please provide defect description for all items marked NOT GOOD.');
       return false;
     }
 
@@ -461,29 +490,23 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       let resStatus: 'PASS' | 'FAIL' | 'NA' = 'PASS';
 
       if (norm === 'NUMERIC') {
-        if (!item.validation || item.validation === 'NONE') {
-          const rawJudgment = answers[item.id + '_judgment'] || '';
-          const judgment = rawJudgment === 'GOOD' ? 'PASS' : (rawJudgment === 'NOT GOOD' || rawJudgment === 'NG') ? 'FAIL' : rawJudgment;
-          resStatus = judgment === 'FAIL' ? 'FAIL' : judgment === 'PASS' ? 'PASS' : 'NA';
+        const numEval = evaluateNumericItem(
+          userVal,
+          item.validation,
+          item.minimumValue,
+          item.maximumValue,
+          item.targetValue,
+          item.toleranceValue,
+          item.unit
+        );
+        if (!numEval.hasStandard) {
+          resStatus = 'NA';
+        } else if (numEval.status === 'FAIL') {
+          resStatus = 'FAIL';
+        } else if (numEval.status === 'PASS') {
+          resStatus = 'PASS';
         } else {
-          const numEval = evaluateNumericItem(
-            userVal,
-            item.validation,
-            item.minimumValue,
-            item.maximumValue,
-            item.targetValue,
-            item.toleranceValue,
-            item.unit
-          );
-          if (!numEval.hasStandard) {
-            resStatus = 'NA';
-          } else if (numEval.status === 'FAIL') {
-            resStatus = 'FAIL';
-          } else if (numEval.status === 'PASS') {
-            resStatus = 'PASS';
-          } else {
-            resStatus = 'NA';
-          }
+          resStatus = 'NA';
         }
       } else if (norm === 'GOOD_NOT_GOOD') {
         resStatus = userVal === 'NOT GOOD' ? 'FAIL' : userVal === 'GOOD' ? 'PASS' : 'NA';
@@ -619,24 +642,14 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   const handleFinalSubmit = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    setValidationError(null);
-
-    // Revalidate inside confirmation modal before Firestore write
-    if (!validateForm()) {
-      setIsSubmitting(false);
-      setShowConfirmModal(false);
-      return;
-    }
-
     try {
       const answerSnapshots = buildAnswerSnapshots();
       const submissionTime = new Date().toISOString();
+
       const finalGltLeadTimeMinutes = calculateMinutesBetween(receivingTime, submissionTime);
 
-      const submissionId = `glt_${joNumber.trim().toUpperCase()}_${attemptNumber}`;
-
       const recordToSave: GLTRecord = {
-        id: submissionId,
+        id: `glt-${Date.now()}`,
         joNumber: joNumber.trim().toUpperCase(),
         productCategory,
         productModel: productModel || `${unitModel} / ${component}` || 'Standard Model',
@@ -659,9 +672,9 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         remarks,
         operatorName: currentUser.name,
         operatorId: currentUser.id,
-        incomingTime: receivingTime,
+        incomingTime:receivingTime,
         submissionTime,
-        gltDurationMinutes: finalGltLeadTimeMinutes,
+        gltDurationMinutes:finalGltLeadTimeMinutes,
       };
 
       await onSaveRecord(recordToSave);
@@ -957,7 +970,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
           </div>
           <h4 className="text-sm font-bold text-amber-900">Checksheet Not Configured</h4>
           <p className="text-xs text-amber-800 max-w-md mx-auto">
-            Checksheet is not available. Contact Administrator.
+            No active checksheet is configured for: <strong>{component} – {unitModel} in GLT</strong>. Please contact Quality Administrator to configure the template in Checksheet Master.
           </p>
         </div>
       ) : (
@@ -1189,19 +1202,19 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={isSubmitting}
+                disabled={!systemEval.isComplete}
                 className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all active:scale-98 ${
-                  isSubmitting
-                    ? 'bg-slate-400 text-white cursor-not-allowed shadow-none'
-                    : systemEval.status === 'GOOD' || !systemEval.isComplete
+                  !systemEval.isComplete
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                    : systemEval.status === 'GOOD'
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-rose-600 hover:bg-rose-700 text-white'
                 }`}
               >
                 <FileCheck2 className="w-5 h-5" />
                 <span>
-                  {isSubmitting
-                    ? 'SUBMITTING...'
+                  {!systemEval.isComplete
+                    ? 'COMPLETE CHECKLIST TO SUBMIT'
                     : 'SUBMIT GLT RESULT'}
                 </span>
               </button>
