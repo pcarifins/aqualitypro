@@ -295,28 +295,92 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
   };
 
   const handleReceiveAtDynotest = async () => {
-    if (testType === 'PROD') {
-      if (!latestGLTResult) {
-        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
-        return;
-      }
-      if (latestGLTResult !== 'GOOD') {
-        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
-        return;
-      }
-    }
-    const nowIso = new Date().toISOString();
-    setReceivingTime(nowIso);
+    if (isReceiving) return;
+
     setValidationError(null);
-    if (joNumber) {
-      await store.updateQueueRecordByJONumber(joNumber, {
-        receivingTime: nowIso,
-        status: 'ON_PROCESS',
-        priorityLocked: true,
-      });
+
+    if (!joNumber.trim()) {
+      setValidationError(
+        'Receive failed: Please select an Engine JO first.'
+      );
+      return;
     }
-    setToastMessage('Received at Dynotest! Testing timer started.');
-    setTimeout(() => setToastMessage(null), 3000);
+
+    if (!selectedQueueId) {
+      setValidationError(
+        'Receive failed: Queue Record ID is missing. Select the JO again.'
+      );
+      return;
+    }
+
+    const selectedQueue = queueRecords.find(
+      (record) =>
+        record.queueRecordId === selectedQueueId
+    );
+
+    if (!selectedQueue) {
+      setValidationError(
+        `Receive failed: Queue record ${selectedQueueId} was not found.`
+      );
+      return;
+    }
+
+    if (
+      selectedQueue.testType === 'PROD' &&
+      selectedQueue.gltStatus !== 'GOOD'
+    ) {
+      setValidationError(
+        `Dynotest Receive blocked.
+  JO: ${selectedQueue.joRoNumber}
+  Required: GLT GOOD
+  Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
+      );
+      return;
+    }
+
+    setIsReceiving(true);
+
+    try {
+      const nowIso = new Date().toISOString();
+
+      await store.updateQueueRecord(
+        selectedQueueId,
+        {
+          receivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        }
+      );
+
+      setReceivingTime(nowIso);
+      setLatestGLTResult(
+        selectedQueue.gltStatus || null
+      );
+      setValidationError(null);
+
+      setToastMessage(
+        `JO ${selectedQueue.joRoNumber} received at Dynotest successfully.`
+      );
+
+      setTimeout(
+        () => setToastMessage(null),
+        3000
+      );
+    } catch (error: any) {
+      console.error(
+        'Dynotest Receive failed:',
+        error
+      );
+
+      setValidationError(
+        `Dynotest Receive failed.
+  JO: ${selectedQueue.joRoNumber}
+  Queue ID: ${selectedQueueId}
+  Cause: ${error?.message || 'Firestore update failed'}`
+      );
+    } finally {
+      setIsReceiving(false);
+    }
   };
 
   const handleAnswerChange = (itemId: string, val: string) => {
@@ -785,10 +849,20 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
             <button
               type="button"
               onClick={handleReceiveAtDynotest}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-md transition-all"
+              disabled={isReceiving}
+              className={`w-full py-3 text-white font-bold rounded-xl ${
+                isReceiving
+                  ? 'bg-slate-400 cursor-wait'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
             >
               <Clock className="w-4 h-4" />
-              <span>Click to "Receive at Dynotest" (Start Lead-Time Timer)</span>
+
+              <span>
+                {isReceiving
+                  ? 'RECEIVING...'
+                  : 'RECEIVE AT DYNOTEST'}
+              </span>
             </button>
           ) : (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
@@ -1052,21 +1126,15 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={!systemEval.isComplete}
-                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
-                  !systemEval.isComplete
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                    : systemEval.status === 'GOOD'
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold text-white shadow-md ${
+                  systemEval.status === 'NOT GOOD'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
                 }`}
               >
                 <Send className="w-5 h-5" />
-
                 <span>
-                  {!systemEval.isComplete
-                    ? 'COMPLETE CHECKLIST TO SUBMIT'
-                    : 'SUBMIT DYNOTEST RESULT'}
+                  REVIEW & SUBMIT DYNOTEST RESULT
                 </span>
               </button>
             </div>

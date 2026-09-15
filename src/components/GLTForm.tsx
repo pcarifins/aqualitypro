@@ -111,6 +111,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -317,50 +318,73 @@ export const GLTForm: React.FC<GLTFormProps> = ({
   };
 
   const handleReceiveAtGLT = async () => {
-    const nowIso = new Date().toISOString();
+    if (isReceiving) return;
+
+    setValidationError(null);
+
+    if (!joNumber.trim()) {
+      setValidationError(
+        'Receive failed: Please select a JO first.'
+      );
+      return;
+    }
+
+    if (!selectedQueueId) {
+      setValidationError(
+        'Receive failed: Queue Record ID is missing. Select the JO again.'
+      );
+      return;
+    }
+
+    const selectedQueue = queueRecords.find(
+      (record) =>
+        record.queueRecordId === selectedQueueId
+    );
+
+    if (!selectedQueue) {
+      setValidationError(
+        `Receive failed: Queue record ${selectedQueueId} was not found. Refresh and select the JO again.`
+      );
+      return;
+    }
+
+    setIsReceiving(true);
+
     try {
-      if (!joNumber.trim()) {
-        setValidationError(
-          'Please select an authorized JO before receiving at GLT.'
-        );
-        return;
-      }
+      const nowIso = new Date().toISOString();
 
-      const targetQ =
-        selectedQueueId ||
-        queueRecords.find(
-          (q) =>
-            q.joRoNumber.toUpperCase() ===
-            joNumber.trim().toUpperCase()
-        )?.queueRecordId;
-
-      if (targetQ) {
-        await store.updateQueueRecord(targetQ, {
+      await store.updateQueueRecord(
+        selectedQueueId,
+        {
           gltReceivingTime: nowIso,
           status: 'ON_PROCESS',
           priorityLocked: true,
-        }).catch(async () => {
-          await store.updateQueueRecordByJONumber(joNumber.trim(), {
-            gltReceivingTime: nowIso,
-            status: 'ON_PROCESS',
-            priorityLocked: true,
-          }).catch(() => {});
-        });
-      } else {
-        await store.updateQueueRecordByJONumber(joNumber.trim(), {
-          gltReceivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-        }).catch(() => {});
-      }
-    } catch (error: any) {
-      console.warn('Non-blocking queue update warning on receive at GLT:', error);
-    } finally {
-      // Always set local receiving time so user is never blocked from clicking / starting timer
+        }
+      );
+
+      // Update UI only after Firestore succeeds
       setReceivingTime(nowIso);
       setValidationError(null);
-      setToastMessage('Received at GLT! GLT lead-time timer started.');
-      setTimeout(() => setToastMessage(null), 3000);
+
+      setToastMessage(
+        `JO ${selectedQueue.joRoNumber} received at GLT successfully.`
+      );
+
+      setTimeout(
+        () => setToastMessage(null),
+        3000
+      );
+    } catch (error: any) {
+      console.error('GLT Receive failed:', error);
+
+      setValidationError(
+        `GLT Receive failed.
+  JO: ${selectedQueue.joRoNumber}
+  Queue ID: ${selectedQueueId}
+  Cause: ${error?.message || 'Firestore update failed'}`
+      );
+    } finally {
+      setIsReceiving(false);
     }
   };
 
@@ -680,10 +704,12 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       await onSaveRecord(recordToSave);
 
       // Update Queue record status if attached
-      const targetQ =
-        selectedQueueId ||
-        queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
-          ?.queueRecordId;
+      const targetQ = selectedQueueId;
+      if (!targetQ) {
+        throw new Error(
+          'Selected Queue Record ID is missing.'
+        );
+      }
 
       if (targetQ) {
         await store.updateQueueRecord(targetQ, {
@@ -899,13 +925,19 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               <button
                 type="button"
                 onClick={handleReceiveAtGLT}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-md transition-all"
+                disabled={isReceiving}
+                className={`w-full py-3 text-white font-bold rounded-xl ${
+                  isReceiving
+                    ? 'bg-slate-400 cursor-wait'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
                 <Clock className="w-4 h-4" />
 
                 <span>
-                  Click to "Receive at GLT"
-                  (Start Lead-Time Timer)
+                  {isReceiving
+                    ? 'RECEIVING...'
+                    : 'RECEIVE AT GLT'}
                 </span>
               </button>
             ) : (
@@ -1202,21 +1234,14 @@ export const GLTForm: React.FC<GLTFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={!systemEval.isComplete}
-                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all active:scale-98 ${
-                  !systemEval.isComplete
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                    : systemEval.status === 'GOOD'
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold text-white shadow-md ${
+                  systemEval.status === 'NOT GOOD'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
                 <FileCheck2 className="w-5 h-5" />
-                <span>
-                  {!systemEval.isComplete
-                    ? 'COMPLETE CHECKLIST TO SUBMIT'
-                    : 'SUBMIT GLT RESULT'}
-                </span>
+                <span>REVIEW & SUBMIT GLT RESULT</span>
               </button>
             </div>
           </div>

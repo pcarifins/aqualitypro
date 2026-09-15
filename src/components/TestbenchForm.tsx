@@ -301,28 +301,96 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   };
 
   const handleReceiveAtTestbench = async () => {
-    if (testType === 'PROD' && compGroup !== 'Cylinder') {
-      if (!latestGLTResult) {
-        setValidationError('This Job Order has no completed GLT inspection record. PROD Job Orders must first pass GLT with a GOOD result before entering this stage.');
-        return;
-      }
-      if (latestGLTResult !== 'GOOD') {
-        setValidationError(`The GLT result for this Job Order is ${latestGLTResult}. A PROD Job Order must successfully pass GLT with a GOOD result before entering this stage.`);
-        return;
-      }
-    }
-    const nowIso = new Date().toISOString();
-    setReceivingTime(nowIso);
+    if (isReceiving) return;
+
     setValidationError(null);
-    if (joNumber) {
-      await store.updateQueueRecordByJONumber(joNumber, {
-        receivingTime: nowIso,
-        status: 'ON_PROCESS',
-        priorityLocked: true,
-      });
+
+    if (!joNumber.trim()) {
+      setValidationError(
+        'Receive failed: Please select a Testbench JO first.'
+      );
+      return;
     }
-    setToastMessage('Received at Testbench! Testing timer started.');
-    setTimeout(() => setToastMessage(null), 3000);
+
+    if (!selectedQueueId) {
+      setValidationError(
+        'Receive failed: Queue Record ID is missing. Select the JO again.'
+      );
+      return;
+    }
+
+    const selectedQueue = queueRecords.find(
+      (record) =>
+        record.queueRecordId === selectedQueueId
+    );
+
+    if (!selectedQueue) {
+      setValidationError(
+        `Receive failed: Queue record ${selectedQueueId} was not found.`
+      );
+      return;
+    }
+
+    const requiresGLT =
+      selectedQueue.compGroup === 'PT-PPM' &&
+      selectedQueue.testType === 'PROD';
+
+    if (
+      requiresGLT &&
+      selectedQueue.gltStatus !== 'GOOD'
+    ) {
+      setValidationError(
+        `Testbench Receive blocked.
+  JO: ${selectedQueue.joRoNumber}
+  Required: PT-PPM PROD requires GLT GOOD.
+  Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
+      );
+      return;
+    }
+
+    setIsReceiving(true);
+
+    try {
+      const nowIso = new Date().toISOString();
+
+      await store.updateQueueRecord(
+        selectedQueueId,
+        {
+          receivingTime: nowIso,
+          status: 'ON_PROCESS',
+          priorityLocked: true,
+        }
+      );
+
+      setReceivingTime(nowIso);
+      setLatestGLTResult(
+        selectedQueue.gltStatus || null
+      );
+      setValidationError(null);
+
+      setToastMessage(
+        `JO ${selectedQueue.joRoNumber} received at Testbench successfully.`
+      );
+
+      setTimeout(
+        () => setToastMessage(null),
+        3000
+      );
+    } catch (error: any) {
+      console.error(
+        'Testbench Receive failed:',
+        error
+      );
+
+      setValidationError(
+        `Testbench Receive failed.
+  JO: ${selectedQueue.joRoNumber}
+  Queue ID: ${selectedQueueId}
+  Cause: ${error?.message || 'Firestore update failed'}`
+      );
+    } finally {
+      setIsReceiving(false);
+    }
   };
 
   const handleAnswerChange = (itemId: string, val: string) => {
@@ -804,10 +872,20 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
             <button
               type="button"
               onClick={handleReceiveAtTestbench}
-              className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-md transition-all"
+              disabled={isReceiving}
+              className={`w-full py-3 text-white font-bold rounded-xl ${
+                isReceiving
+                  ? 'bg-slate-400 cursor-wait'
+                  : 'bg-cyan-600 hover:bg-cyan-700'
+              }`}
             >
               <Clock className="w-4 h-4" />
-              <span>Click to "Receive at Testbench" (Start Lead-Time Timer)</span>
+
+              <span>
+                {isReceiving
+                  ? 'RECEIVING...'
+                  : 'RECEIVE AT TESTBENCH'}
+              </span>
             </button>
           ) : (
             <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
@@ -1076,21 +1154,15 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
               <button
                 type="button"
                 onClick={handleOpenConfirm}
-                disabled={!systemEval.isComplete}
-                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 shadow-md transition-all ${
-                  !systemEval.isComplete
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                    : systemEval.status === 'GOOD'
-                    ? 'bg-cyan-600 hover:bg-cyan-700 text-white'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                className={`w-full py-3.5 px-5 rounded-xl text-sm font-bold text-white shadow-md ${
+                  systemEval.status === 'NOT GOOD'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-cyan-600 hover:bg-cyan-700'
                 }`}
               >
                 <Send className="w-5 h-5" />
-
                 <span>
-                  {!systemEval.isComplete
-                    ? 'COMPLETE CHECKLIST TO SUBMIT'
-                    : 'SUBMIT TESTBENCH RESULT'}
+                  REVIEW & SUBMIT TESTBENCH RESULT
                 </span>
               </button>
             </div>

@@ -55,6 +55,9 @@ import {
   initializeAndMigrateFirestore,
   sanitizeFirestoreValue,
   testFirestoreConnection,
+  isQuotaError,
+  isFirestoreQuotaExceeded,
+  markQuotaExceeded,
 } from '../lib/firestoreSync';
 
 import {
@@ -1565,8 +1568,17 @@ export class DataStore {
       }
     }
 
-    if (hasChanges) {
-      await batch.commit();
+    if (hasChanges && !isFirestoreQuotaExceeded()) {
+      try {
+        await batch.commit();
+      } catch (err) {
+        if (isQuotaError(err)) {
+          markQuotaExceeded(err);
+          console.warn('[storageEngine] Priorities normalized in local cache; remote commit deferred due to quota limit.');
+        } else {
+          console.error("Error committing normalized priorities to Firestore:", err);
+        }
+      }
     }
     this.saveToStorageCache();
     this.notifyListeners();
@@ -1841,11 +1853,16 @@ export class DataStore {
       }
     }
     
-    if (hasUpdated) {
+    if (hasUpdated && !isFirestoreQuotaExceeded()) {
       try {
         await batch.commit();
       } catch (e) {
-        console.error("Error committing batch line updates:", e);
+        if (isQuotaError(e)) {
+          markQuotaExceeded(e);
+          console.warn('[storageEngine] Line assignments updated in local cache; remote commit deferred due to quota limit.');
+        } else {
+          console.error("Error committing batch line updates:", e);
+        }
       }
     }
     return hasUpdated;
@@ -1958,12 +1975,31 @@ export class DataStore {
     joNumber: string,
     updates: Partial<QueueRecord>
   ): Promise<void> {
-    const target = this.queueRecords.find(
-      (q) => q.joRoNumber.toUpperCase() === joNumber.toUpperCase()
+    const normalizedJO =
+      joNumber.trim().toUpperCase();
+
+    const matches = this.queueRecords.filter(
+      (q) =>
+        q.joRoNumber.trim().toUpperCase() ===
+        normalizedJO
     );
-    if (target) {
-      await this.updateQueueRecord(target.queueRecordId, updates);
+
+    if (matches.length === 0) {
+      throw new Error(
+        `Queue record not found for JO ${normalizedJO}`
+      );
     }
+
+    if (matches.length > 1) {
+      throw new Error(
+        `Duplicate queue records found for JO ${normalizedJO}. Update must use queueRecordId.`
+      );
+    }
+
+    await this.updateQueueRecord(
+      matches[0].queueRecordId,
+      updates
+    );
   }
 
   public async reorderQueue(
