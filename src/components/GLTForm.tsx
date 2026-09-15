@@ -51,6 +51,23 @@ interface GLTFormProps {
   onSuccessSubmitted: (joNumber: string) => void;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 18000, operationName = 'Firestore operation'): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${operationName} timed out after ${Math.round(timeoutMs / 1000)} seconds. Please check your connection and retry.`));
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
 export const GLTForm: React.FC<GLTFormProps> = ({
   currentUser,
   productModels,
@@ -353,13 +370,17 @@ export const GLTForm: React.FC<GLTFormProps> = ({
     try {
       const nowIso = new Date().toISOString();
 
-      await store.updateQueueRecord(
-        selectedQueueId,
-        {
-          gltReceivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-        }
+      await withTimeout(
+        store.updateQueueRecord(
+          selectedQueueId,
+          {
+            gltReceivingTime: nowIso,
+            status: 'ON_PROCESS',
+            priorityLocked: true,
+          }
+        ),
+        18000,
+        'GLT Receive'
       );
 
       // Update UI only after Firestore succeeds
@@ -378,10 +399,10 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       console.error('GLT Receive failed:', error);
 
       setValidationError(
-        `GLT Receive failed.
-  JO: ${selectedQueue.joRoNumber}
-  Queue ID: ${selectedQueueId}
-  Cause: ${error?.message || 'Firestore update failed'}`
+        `[Receive Failed] GLT Receive failed.
+JO: ${selectedQueue.joRoNumber}
+Queue ID: ${selectedQueueId}
+Cause: ${error?.message || 'Firestore update failed'}`
       );
     } finally {
       setIsReceiving(false);
@@ -673,7 +694,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       const finalGltLeadTimeMinutes = calculateMinutesBetween(receivingTime, submissionTime);
 
       const recordToSave: GLTRecord = {
-        id: `glt-${Date.now()}`,
+        id: `glt-${joNumber.trim().toUpperCase()}-att-${attemptNumber}`,
         joNumber: joNumber.trim().toUpperCase(),
         productCategory,
         productModel: productModel || `${unitModel} / ${component}` || 'Standard Model',
@@ -701,7 +722,7 @@ export const GLTForm: React.FC<GLTFormProps> = ({
         gltDurationMinutes:finalGltLeadTimeMinutes,
       };
 
-      await onSaveRecord(recordToSave);
+      await withTimeout(onSaveRecord(recordToSave), 18000, 'GLT Save Record');
 
       // Update Queue record status if attached
       const targetQ = selectedQueueId;
@@ -712,18 +733,27 @@ export const GLTForm: React.FC<GLTFormProps> = ({
       }
 
       if (targetQ) {
-        await store.updateQueueRecord(targetQ, {
-          gltStatus: finalResult === 'GOOD' ? 'GOOD' : 'NOT_GOOD',
-          status: finalResult === 'GOOD' ? 'ON_PROCESS' : 'WAITING',
-          actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
-        });
+        await withTimeout(
+          store.updateQueueRecord(targetQ, {
+            gltStatus: finalResult === 'GOOD' ? 'GOOD' : 'NOT_GOOD',
+            status: finalResult === 'GOOD' ? 'ON_PROCESS' : 'WAITING',
+            actualLineOffDateTime: actualLineOffDateTime.trim() || undefined,
+          }),
+          18000,
+          'GLT Queue Update'
+        );
       }
 
       setShowConfirmModal(false);
       onSuccessSubmitted(joNumber);
     } catch (error: any) {
       console.error('Failed to submit GLT record:', error);
-      setValidationError(`Submission Failed: ${error?.message || 'Firestore write error'}`);
+      setValidationError(
+        `[Submit Failed] GLT Submission failed.
+JO: ${joNumber}
+Queue ID: ${selectedQueueId}
+Error: ${error?.message || 'Firestore write error'}`
+      );
       setShowConfirmModal(false);
     } finally {
       setIsSubmitting(false);

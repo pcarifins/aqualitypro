@@ -48,6 +48,23 @@ interface TestbenchFormProps {
   onSuccessSubmitted: (joNumber: string) => void;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 18000, operationName = 'Firestore operation'): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${operationName} timed out after ${Math.round(timeoutMs / 1000)} seconds. Please check your connection and retry.`));
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
 export const TestbenchForm: React.FC<TestbenchFormProps> = ({
   currentUser,
   productModels,
@@ -92,6 +109,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
 
   // Form Controls
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -341,9 +359,9 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     ) {
       setValidationError(
         `Testbench Receive blocked.
-  JO: ${selectedQueue.joRoNumber}
-  Required: PT-PPM PROD requires GLT GOOD.
-  Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
+JO: ${selectedQueue.joRoNumber}
+Required: PT-PPM PROD requires GLT GOOD.
+Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
       );
       return;
     }
@@ -353,13 +371,17 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
     try {
       const nowIso = new Date().toISOString();
 
-      await store.updateQueueRecord(
-        selectedQueueId,
-        {
-          receivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-        }
+      await withTimeout(
+        store.updateQueueRecord(
+          selectedQueueId,
+          {
+            receivingTime: nowIso,
+            status: 'ON_PROCESS',
+            priorityLocked: true,
+          }
+        ),
+        18000,
+        'Testbench Receive'
       );
 
       setReceivingTime(nowIso);
@@ -383,10 +405,10 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       );
 
       setValidationError(
-        `Testbench Receive failed.
-  JO: ${selectedQueue.joRoNumber}
-  Queue ID: ${selectedQueueId}
-  Cause: ${error?.message || 'Firestore update failed'}`
+        `[Receive Failed] Testbench Receive failed.
+JO: ${selectedQueue.joRoNumber}
+Queue ID: ${selectedQueueId}
+Cause: ${error?.message || 'Firestore update failed'}`
       );
     } finally {
       setIsReceiving(false);
@@ -627,7 +649,7 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
       const answerSnapshots = buildAnswerSnapshots();
 
       const recordToSave: HydraulicRecord = {
-        id: `hyd-${Date.now()}`,
+        id: `hyd-${joNumber.trim().toUpperCase()}-att-${attemptNumber}`,
         joNumber: joNumber.trim().toUpperCase(),
         productCategory: 'Power Train Component',
         productModel: productModel || `${unitModel} / ${component}` || 'PT Component',
@@ -653,25 +675,34 @@ export const TestbenchForm: React.FC<TestbenchFormProps> = ({
         remarks,
       };
 
-      await onSaveRecord(recordToSave);
+      await withTimeout(onSaveRecord(recordToSave), 18000, 'Testbench Save Record');
 
       // Update Queue record
-      const targetQ =
-        selectedQueueId ||
-        queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
-          ?.queueRecordId;
+      const targetQ = selectedQueueId;
+      if (!targetQ) {
+        throw new Error('Selected Queue Record ID is missing.');
+      }
 
       if (targetQ) {
-        await store.updateQueueRecord(targetQ, {
-          status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
-        });
+        await withTimeout(
+          store.updateQueueRecord(targetQ, {
+            status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
+          }),
+          18000,
+          'Testbench Queue Update'
+        );
       }
 
       setShowConfirmModal(false);
       onSuccessSubmitted(joNumber);
     } catch (error: any) {
       console.error('Failed to submit Testbench record:', error);
-      setValidationError(`Testbench Submission Failed: ${error?.message || 'Firestore write error'}`);
+      setValidationError(
+        `[Submit Failed] Testbench Submission failed.
+JO: ${joNumber}
+Queue ID: ${selectedQueueId}
+Error: ${error?.message || 'Firestore write error'}`
+      );
       setShowConfirmModal(false);
     } finally {
       setIsSubmitting(false);

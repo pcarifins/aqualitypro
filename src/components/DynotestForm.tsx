@@ -49,6 +49,23 @@ interface DynotestFormProps {
   onSuccessSubmitted: (joNumber: string) => void;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 18000, operationName = 'Firestore operation'): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${operationName} timed out after ${Math.round(timeoutMs / 1000)} seconds. Please check your connection and retry.`));
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
 export const DynotestForm: React.FC<DynotestFormProps> = ({
   currentUser,
   productModels,
@@ -92,6 +109,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
 
   // Form Controls
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -331,9 +349,9 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     ) {
       setValidationError(
         `Dynotest Receive blocked.
-  JO: ${selectedQueue.joRoNumber}
-  Required: GLT GOOD
-  Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
+JO: ${selectedQueue.joRoNumber}
+Required: GLT GOOD
+Current GLT status: ${selectedQueue.gltStatus || 'PENDING'}`
       );
       return;
     }
@@ -343,13 +361,17 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
     try {
       const nowIso = new Date().toISOString();
 
-      await store.updateQueueRecord(
-        selectedQueueId,
-        {
-          receivingTime: nowIso,
-          status: 'ON_PROCESS',
-          priorityLocked: true,
-        }
+      await withTimeout(
+        store.updateQueueRecord(
+          selectedQueueId,
+          {
+            receivingTime: nowIso,
+            status: 'ON_PROCESS',
+            priorityLocked: true,
+          }
+        ),
+        18000,
+        'Dynotest Receive'
       );
 
       setReceivingTime(nowIso);
@@ -373,10 +395,10 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       );
 
       setValidationError(
-        `Dynotest Receive failed.
-  JO: ${selectedQueue.joRoNumber}
-  Queue ID: ${selectedQueueId}
-  Cause: ${error?.message || 'Firestore update failed'}`
+        `[Receive Failed] Dynotest Receive failed.
+JO: ${selectedQueue.joRoNumber}
+Queue ID: ${selectedQueueId}
+Cause: ${error?.message || 'Firestore update failed'}`
       );
     } finally {
       setIsReceiving(false);
@@ -617,7 +639,7 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
       const answerSnapshots = buildAnswerSnapshots();
 
       const recordToSave: DynotestRecord = {
-        id: `dyno-${Date.now()}`,
+        id: `dyno-${joNumber.trim().toUpperCase()}-att-${attemptNumber}`,
         joNumber: joNumber.trim().toUpperCase(),
         productCategory: 'Engine',
         productModel: productModel || `${unitModel} / ${component}` || 'Engine Standard',
@@ -642,25 +664,34 @@ export const DynotestForm: React.FC<DynotestFormProps> = ({
         remarks,
       };
 
-      await onSaveRecord(recordToSave);
+      await withTimeout(onSaveRecord(recordToSave), 18000, 'Dynotest Save Record');
 
       // Update Queue record
-      const targetQ =
-        selectedQueueId ||
-        queueRecords.find((q) => q.joRoNumber.toUpperCase() === joNumber.trim().toUpperCase())
-          ?.queueRecordId;
+      const targetQ = selectedQueueId;
+      if (!targetQ) {
+        throw new Error('Selected Queue Record ID is missing.');
+      }
 
       if (targetQ) {
-        await store.updateQueueRecord(targetQ, {
-          status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
-        });
+        await withTimeout(
+          store.updateQueueRecord(targetQ, {
+            status: finalResult === 'GOOD' ? 'FINISH' : 'WAITING',
+          }),
+          18000,
+          'Dynotest Queue Update'
+        );
       }
 
       setShowConfirmModal(false);
       onSuccessSubmitted(joNumber);
     } catch (error: any) {
       console.error('Failed to submit Dynotest record:', error);
-      setValidationError(`Dynotest Submission Failed: ${error?.message || 'Firestore write error'}`);
+      setValidationError(
+        `[Submit Failed] Dynotest Submission failed.
+JO: ${joNumber}
+Queue ID: ${selectedQueueId}
+Error: ${error?.message || 'Firestore write error'}`
+      );
       setShowConfirmModal(false);
     } finally {
       setIsSubmitting(false);
